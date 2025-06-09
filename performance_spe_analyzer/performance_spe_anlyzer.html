@@ -7,6 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
+        <script src="https://d3js.org/d3.v7.min.js"></script> <!-- D3.js added here -->
     <script>
         tailwind.config = {
             theme: {
@@ -607,7 +608,17 @@
                         if (nodeStack.length === 0) {
                             coreData.children.push(metricNode);
                         } else {
-                            nodeStack[nodeStack.length - 1].node.children.push(metricNode);
+                            const parentStackEntry = nodeStack[nodeStack.length - 1];
+                            // Check if the parent entry and its 'node' property are valid
+                            if (parentStackEntry && parentStackEntry.node) {
+                                parentStackEntry.node.children.push(metricNode);
+                            } else {
+                                // Fallback: If the parent entry on stack is corrupted (node is undefined),
+                                // add the current metricNode to the top-level children for this core.
+                                // This prevents the crash and allows parsing to continue.
+                                console.warn('Encountered a corrupted parent stack entry. Adding node "' + metricNode.name + '" as a top-level item for the current core.');
+                                coreData.children.push(metricNode);
+                            }
                         }
 
                         // Push current node onto stack
@@ -1118,10 +1129,7 @@
             }
         });
         
-        // 引入D3.js库
-        const script = document.createElement('script');
-        script.src = 'https://d3js.org/d3.v7.min.js';
-        document.head.appendChild(script);
+        // Removed dynamic D3.js library introduction from here
     </script>
 </body>
 </html>
