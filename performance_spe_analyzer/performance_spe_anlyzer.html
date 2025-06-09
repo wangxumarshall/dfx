@@ -608,7 +608,17 @@
                         if (nodeStack.length === 0) {
                             coreData.children.push(metricNode);
                         } else {
-                            nodeStack[nodeStack.length - 1].node.children.push(metricNode);
+                            const parentStackEntry = nodeStack[nodeStack.length - 1];
+                            // Check if the parent entry and its 'node' property are valid
+                            if (parentStackEntry && parentStackEntry.node) {
+                                parentStackEntry.node.children.push(metricNode);
+                            } else {
+                                // Fallback: If the parent entry on stack is corrupted (node is undefined),
+                                // add the current metricNode to the top-level children for this core.
+                                // This prevents the crash and allows parsing to continue.
+                                console.warn('Encountered a corrupted parent stack entry. Adding node "' + metricNode.name + '" as a top-level item for the current core.');
+                                coreData.children.push(metricNode);
+                            }
                         }
 
                         // Push current node onto stack
