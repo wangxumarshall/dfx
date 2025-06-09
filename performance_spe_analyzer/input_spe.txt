@@ -50,7 +50,7 @@
                         L3 or DRAM Bound:                    3.568%
                         Store Bound:                         0.053%
 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
----------------core 1-------------------------
+---------------core 15-------------------------
 +++++++++++++++++++++Top-down Microarchitecture Analysis Summary+++++++++++++++++
         Total Execution Instruction:                     1080526101
         Total Execution Cycles:                          1815514686
