@@ -1,0 +1,52 @@
+---------------core 0-------------------------
++++++++++++++++++++++Top-down Microarchitecture Analysis Summary+++++++++++++++++
+        Total Execution Instruction:                     1080526101
+        Total Execution Cycles:                          1815514686
+        Instructions Per Cycle:                               0.595
+
+        Front-End Bound:                                   29.186%
+                Front-End Latency:                         27.172%
+                        iTLB Miss:                           3.417%
+                                L1 iTLB Miss:                2.418%
+                                L2 iTLB Miss:                0.998%
+                        iCache Miss:                        31.273%
+                                L1 iCache Miss:             14.043%
+                                L2 iCache Miss:             17.229%
+                        BP_Misp_Flush:                       1.421%
+                        OoO Rob Flush:                       1.682%
+                        Static Predictor Flush:              1.538%
+                Front End Bound Bandwidth:                   2.014%
+
+        Bad Speculation:                                     6.589%
+                Branch Mispredicts:                          3.017%
+                        Indirect Branch:                     0.240%
+                        Push Branch:                         0.032%
+                        Pop Branch:                          0.141%
+                        Other Branch:                        2.777%
+                Machine Clears:                              3.572%
+                        Nuke Flush:                          0.148%
+                        Other Flush:                         3.424%
+
+        Retiring:                                           14.879%
+
+        Back-End Bound:                                     49.346%
+                Resource Bound:                             10.616%
+                        Sync_stall:                          0.000%
+                        Rob_stall:                           0.108%
+                        Ptag_stall:                          0.698%
+                        SaveOpQ_stall:                       0.000%
+                        PC_buffer_stall:                     0.164%
+                        Other_stall:                        10.043%
+                Core Bound:                                 16.163%
+                        Divider:                             0.013%
+                        FSU_stall:                           0.003%
+                        Exe Ports Util:                     16.146%
+                                ALU BRU IssueQ Full:         1.424%
+                                LS IssueQ Full:              2.483%
+                                FSU IssueQ Full:             0.005%
+                Memory Bound:                               22.568%
+                        L1 Bound:                           18.670%
+                        L2 Bound:                            0.277%
+                        L3 or DRAM Bound:                    3.568%
+                        Store Bound:                         0.053%
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++

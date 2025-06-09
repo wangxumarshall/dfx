@@ -1,0 +1,952 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Top-down分析数据可视化</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#165DFF',
+                        secondary: '#722ED1',
+                        frontend: '#FF7D00',
+                        frontend_latency: '#FF9A3C',
+                        frontend_bandwidth: '#FFB779',
+                        speculation: '#722ED1',
+                        branch: '#9254DE',
+                        machine: '#B388FF',
+                        retiring: '#0FC6C2',
+                        backend: '#F5222D',
+                        resource: '#FF4D4F',
+                        core: '#FF7875',
+                        memory: '#FF9C9C',
+                        l1: '#FFBB96',
+                        l2: '#FFD6B8',
+                        l3: '#FFF1E6',
+                        store: '#FFE8D9',
+                    },
+                    fontFamily: {
+                        inter: ['Inter', 'system-ui', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .content-auto {
+                content-visibility: auto;
+            }
+            .card-shadow {
+                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+            }
+            .hover-scale {
+                transition: transform 0.3s ease;
+            }
+            .hover-scale:hover {
+                transform: scale(1.02);
+            }
+            .grid-auto-fit {
+                grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            }
+            .drop-zone {
+                border: 2px dashed #e2e8f0;
+                border-radius: 8px;
+                padding: 2rem;
+                text-align: center;
+                cursor: pointer;
+                transition: all 0.3s ease;
+            }
+            .drop-zone:hover {
+                background-color: #f8fafc;
+            }
+            .drop-zone.active {
+                border-color: #165DFF;
+                background-color: #edf2f7;
+            }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 font-inter text-gray-800">
+    <div class="container mx-auto px-4 py-8">
+        <header class="mb-12 text-center">
+            <h1 class="text-[clamp(1.8rem,4vw,2.5rem)] font-bold text-gray-800 mb-3">CPU Top-down分析数据可视化</h1>
+            <p class="text-gray-600 max-w-3xl mx-auto">通过层次化矩形图直观展示每个CPU核的性能分析数据，清晰呈现各组件的占比关系</p>
+        </header>
+
+        <!-- 文件上传区域 -->
+        <div class="mb-8">
+            <div id="dropZone" class="drop-zone">
+                <div class="flex flex-col items-center justify-center">
+                    <i class="fa fa-file-text-o text-4xl text-gray-400 mb-3"></i>
+                    <p class="text-gray-600 mb-2">拖放topdown分析文本文件到此处，或</p>
+                    <label id="fileLabel" class="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-md transition-all duration-300 cursor-pointer">
+                        <i class="fa fa-upload mr-2"></i>选择文件
+                        <input type="file" id="fileInput" accept=".txt" class="hidden">
+                    </label>
+                    <p class="text-gray-400 text-sm mt-3">支持的格式：.txt</p>
+                </div>
+            </div>
+            <div id="fileInfo" class="hidden mt-4 p-3 bg-gray-50 rounded-md border border-gray-200">
+                <div class="flex items-center">
+                    <i class="fa fa-file-text-o text-primary mr-3"></i>
+                    <div>
+                        <p id="fileName" class="font-medium text-gray-800"></p>
+                        <p id="fileSize" class="text-sm text-gray-500"></p>
+                    </div>
+                    <button id="removeFile" class="ml-auto text-gray-400 hover:text-gray-600">
+                        <i class="fa fa-times"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div class="mb-8 flex flex-wrap justify-between items-center">
+            <div class="mb-4 md:mb-0">
+                <button id="expand-all" class="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-md mr-2 transition-all duration-300 flex items-center" disabled>
+                    <i class="fa fa-expand mr-2"></i>全部展开
+                </button>
+                <button id="collapse-all" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-4 py-2 rounded-md transition-all duration-300 flex items-center" disabled>
+                    <i class="fa fa-compress mr-2"></i>全部折叠
+                </button>
+            </div>
+            <div class="flex items-center">
+                <label for="color-mode" class="mr-2 text-gray-700">配色模式:</label>
+                <select id="color-mode" class="bg-white border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/50" disabled>
+                    <option value="category">按类别</option>
+                    <option value="intensity">按强度</option>
+                </select>
+            </div>
+        </div>
+
+        <div id="cores-container" class="grid grid-auto-fit gap-6">
+            <!-- 核数据将通过JavaScript动态生成 -->
+        </div>
+
+        <div id="no-data-message" class="py-12 text-center">
+            <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-100 mb-4">
+                <i class="fa fa-bar-chart text-2xl text-gray-400"></i>
+            </div>
+            <h3 class="text-xl font-medium text-gray-800 mb-2">未上传数据文件</h3>
+            <p class="text-gray-500 max-w-md mx-auto">请上传topdown分析文本文件，以可视化展示CPU微架构性能数据</p>
+        </div>
+
+        <div class="mt-12 hidden" id="analysis-section">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">分析说明</h2>
+            <div class="bg-white rounded-xl p-6 card-shadow">
+                <div class="grid md:grid-cols-2 gap-6">
+                    <div>
+                        <h3 class="font-medium text-gray-800 mb-2 flex items-center">
+                            <i class="fa fa-info-circle text-primary mr-2"></i>Top-down分析方法
+                        </h3>
+                        <p class="text-gray-600 mb-4">Top-down分析是一种微架构性能分析方法，将处理器性能分解为多个层次的指标，帮助识别性能瓶颈。</p>
+                        
+                        <h3 class="font-medium text-gray-800 mb-2 flex items-center">
+                            <i class="fa fa-pie-chart text-primary mr-2"></i>图表解读
+                        </h3>
+                        <ul class="text-gray-600 space-y-2 mb-4">
+                            <li class="flex items-start">
+                                <i class="fa fa-circle text-xs text-frontend mt-1.5 mr-2"></i>
+                                <span>前端瓶颈：指令获取和译码阶段的性能损耗</span>
+                            </li>
+                            <li class="flex items-start">
+                                <i class="fa fa-circle text-xs text-speculation mt-1.5 mr-2"></i>
+                                <span>错误推测：分支预测错误和机器清空导致的性能损耗</span>
+                            </li>
+                            <li class="flex items-start">
+                                <i class="fa fa-circle text-xs text-retiring mt-1.5 mr-2"></i>
+                                <span>执行阶段：指令实际执行的效率</span>
+                            </li>
+                            <li class="flex items-start">
+                                <i class="fa fa-circle text-xs text-backend mt-1.5 mr-2"></i>
+                                <span>后端瓶颈：资源、核心和内存访问相关的性能损耗</span>
+                            </li>
+                        </ul>
+                    </div>
+                    
+                    <div>
+                        <h3 class="font-medium text-gray-800 mb-2 flex items-center">
+                            <i class="fa fa-lightbulb-o text-primary mr-2"></i>性能优化建议
+                        </h3>
+                        <ul class="text-gray-600 space-y-2" id="optimization-suggestions">
+                            <!-- 建议将通过JavaScript动态生成 -->
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <footer class="mt-12 text-center text-gray-500 text-sm">
+            <p>© 2025 CPU性能分析可视化工具 | 数据更新日期: 2025-06-09</p>
+        </footer>
+    </div>
+
+    <script>
+        // 全局变量存储所有核的数据
+        let allCoresData = [];
+        
+        // 初始化事件监听
+        document.addEventListener('DOMContentLoaded', function() {
+            const dropZone = document.getElementById('dropZone');
+            const fileInput = document.getElementById('fileInput');
+            const fileLabel = document.getElementById('fileLabel'); // 获取文件选择按钮标签
+            const fileInfo = document.getElementById('fileInfo');
+            const fileName = document.getElementById('fileName');
+            const fileSize = document.getElementById('fileSize');
+            const removeFile = document.getElementById('removeFile');
+            const coresContainer = document.getElementById('cores-container');
+            const noDataMessage = document.getElementById('no-data-message');
+            const analysisSection = document.getElementById('analysis-section');
+            const expandAllBtn = document.getElementById('expand-all');
+            const collapseAllBtn = document.getElementById('collapse-all');
+            const colorModeSelect = document.getElementById('color-mode');
+            
+            // 拖放事件
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                dropZone.addEventListener(eventName, preventDefaults, false);
+            });
+            
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropZone.addEventListener(eventName, highlight, false);
+            });
+            
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropZone.addEventListener(eventName, unhighlight, false);
+            });
+            
+            function highlight() {
+                dropZone.classList.add('active');
+            }
+            
+            function unhighlight() {
+                dropZone.classList.remove('active');
+            }
+            
+            // 处理文件拖放
+            dropZone.addEventListener('drop', handleDrop, false);
+            
+            function handleDrop(e) {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                
+                if (files.length) {
+                    handleFiles(files[0]);
+                }
+            }
+            
+            // 修复：添加点击事件监听器，触发文件选择对话框
+            fileLabel.addEventListener('click', function() {
+                fileInput.click();
+            });
+            
+            // 处理文件选择
+            fileInput.addEventListener('change', function() {
+                if (this.files.length) {
+                    handleFiles(this.files[0]);
+                }
+            });
+            
+            // 移除文件
+            removeFile.addEventListener('click', function() {
+                fileInput.value = '';
+                fileInfo.classList.add('hidden');
+                coresContainer.innerHTML = '';
+                noDataMessage.classList.remove('hidden');
+                analysisSection.classList.add('hidden');
+                allCoresData = [];
+                
+                // 禁用按钮
+                expandAllBtn.disabled = true;
+                collapseAllBtn.disabled = true;
+                colorModeSelect.disabled = true;
+            });
+            
+            // 处理文件
+            function handleFiles(file) {
+                if (!file.name.endsWith('.txt')) {
+                    alert('请上传文本文件 (.txt)');
+                    return;
+                }
+                
+                // 显示文件信息
+                fileName.textContent = file.name;
+                fileSize.textContent = formatFileSize(file.size);
+                fileInfo.classList.remove('hidden');
+                
+                // 读取文件内容
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const content = e.target.result;
+                    allCoresData = parseTopdownData(content);
+                    
+                    // 渲染所有核的数据
+                    renderAllCores(allCoresData);
+                    
+                    // 显示分析部分
+                    noDataMessage.classList.add('hidden');
+                    analysisSection.classList.remove('hidden');
+                    
+                    // 启用按钮
+                    expandAllBtn.disabled = false;
+                    collapseAllBtn.disabled = false;
+                    colorModeSelect.disabled = false;
+                    
+                    // 生成优化建议
+                    generateOptimizationSuggestions(allCoresData);
+                };
+                reader.readAsText(file);
+            }
+
+            // 解析topdown数据
+            function parseTopdownData(content) {
+                const coresData = [];
+                const coreBlocks = content.split(/^\+{20,}/m).filter(block => block.trim());
+                
+                coreBlocks.forEach(block => {
+                    const lines = block.trim().split('\n');
+                    
+                    // 提取核心编号
+                    const coreMatch = lines[0].match(/core\s+(\d+)/i);
+                    const coreId = coreMatch ? coreMatch[1] : '0';
+                    
+                    // 提取总体指标
+                    const totalInstructionsMatch = lines.find(l => l.includes('Total Execution Instruction'))?.match(/:\s*(\d+)/);
+                    const totalCyclesMatch = lines.find(l => l.includes('Total Execution Cycles'))?.match(/:\s*(\d+)/);
+                    const ipcMatch = lines.find(l => l.includes('Instructions Per Cycle'))?.match(/:\s*(\d+\.\d+)/);
+                    
+                    const totalInstructions = totalInstructionsMatch ? parseInt(totalInstructionsMatch[1]) : 0;
+                    const totalCycles = totalCyclesMatch ? parseInt(totalCyclesMatch[1]) : 0;
+                    const ipc = ipcMatch ? parseFloat(ipcMatch[1]) : 0;
+                    
+                    // 构建数据结构
+                    const coreData = {
+                        name: `Core ${coreId}`,
+                        value: 100,
+                        totalInstructions,
+                        totalCycles,
+                        ipc,
+                        children: []
+                    };
+                    
+                    // 解析各个类别
+                    const categories = ['Front-End Bound', 'Bad Speculation', 'Retiring', 'Back-End Bound'];
+                    const categoryColors = {
+                        'Front-End Bound': '#FF7D00',
+                        'Bad Speculation': '#722ED1',
+                        'Retiring': '#0FC6C2',
+                        'Back-End Bound': '#F5222D',
+                        // 新增颜色定义
+                        'Front-End Latency': '#FF9A3C',
+                        'Front End Bound Bandwidth': '#FFB779',
+                        'iTLB Miss': '#FFBB96',
+                        'iCache Miss': '#FFD6B8',
+                        'BP_Misp_Flush': '#FFA94D',
+                        'OoO Rob Flush': '#FFC078',
+                        'Static Predictor Flush': '#FFD8A8',
+                        'L1 iTLB Miss': '#FFC996',
+                        'L2 iTLB Miss': '#FFD6B8',
+                        'L1 iCache Miss': '#FFBB96',
+                        'L2 iCache Miss': '#FFD6B8',
+                        'Branch Mispredicts': '#9254DE',
+                        'Machine Clears': '#B388FF',
+                        'Resource Bound': '#FF4D4F',
+                        'Core Bound': '#FF7875',
+                        'Memory Bound': '#FF9C9C',
+                        'L1 Bound': '#FFBB96',
+                        'L2 Bound': '#FFD6B8',
+                        'L3 or DRAM Bound': '#FFF1E6',
+                        'Execution Ports': '#FF4D4F',
+                        'Load/Store Units': '#FF7875',
+                        'Register Pressure': '#FF9C9C',
+                        'Scheduler Pressure': '#FF7875',
+                        'Register File Pressure': '#FF9C9C',
+                        'ROB Pressure': '#FFBB96',
+                        'Conditional Branch': '#9254DE',
+                        'Indirect Branch': '#B388FF',
+                        'Call/Return': '#D0A1F0',
+                        'Load Port Starvation': '#B388FF',
+                        'Store Forwarding': '#D0A1F0',
+                        'Memory Ordering': '#E8C6FF',
+                        'Sync_stall': '#FFA94D',
+                        'Rob_stall': '#FFBB96',
+                        'Ptag_stall': '#FFC996',
+                        'SaveOpQ_stall': '#FFD6B8',
+                        'PC_buffer_stall': '#FFE8D9',
+                        'Other_stall': '#FFF1E6',
+                        'Divider': '#FFA94D',
+                        'FSU_stall': '#FFBB96',
+                        'Exe Ports Util': '#FFC996',
+                        'ALU BRU IssueQ Full': '#FFD6B8',
+                        'LS IssueQ Full': '#FFE8D9',
+                        'FSU IssueQ Full': '#FFF1E6',
+                        'Nuke Flush': '#FFA94D',
+                        'Other Flush': '#FFBB96'
+                    };
+                    
+                    categories.forEach(category => {
+                        const categoryIndex = lines.findIndex(l => l.includes(category));
+                        if (categoryIndex === -1) return;
+                        
+                        const categoryLine = lines[categoryIndex];
+                        const categoryValueMatch = categoryLine.match(/(\d+\.\d+)\%/);
+                        const categoryValue = categoryValueMatch ? parseFloat(categoryValueMatch[1]) : 0;
+                        
+                        const categoryObj = {
+                            name: `${category} (${categoryValue.toFixed(2)}%)`,
+                            value: categoryValue,
+                            color: categoryColors[category],
+                            children: []
+                        };
+                        
+                        // 解析子类别
+                        let i = categoryIndex + 1;
+                        while (i < lines.length && !lines[i].trim().startsWith('+') && !categories.some(c => lines[i].includes(c))) {
+                            const line = lines[i].trim();
+                            if (!line) {
+                                i++;
+                                continue;
+                            }
+                            
+                            // 检查是否有子类别
+                            const subCategoryMatch = line.match(/^\s+([\w\s\/\-]+)\:\s+(\d+\.\d+)\%/);
+                            if (subCategoryMatch) {
+                                const subCategoryName = subCategoryMatch[1].trim();
+                                const subCategoryValue = parseFloat(subCategoryMatch[2]);
+                                
+                                const subCategoryObj = {
+                                    name: `${subCategoryName} (${subCategoryValue.toFixed(2)}%)`,
+                                    value: subCategoryValue,
+                                    color: categoryColors[subCategoryName] || getSubCategoryColor(category, subCategoryName),
+                                    children: []
+                                };
+                                
+                                // 检查是否有更深层次的子类别
+                                let j = i + 1;
+                                while (j < lines.length && lines[j].trim().startsWith('        ')) {
+                                    const childLine = lines[j].trim();
+                                    const childMatch = childLine.match(/^\s+([\w\s\/\-]+)\:\s+(\d+\.\d+)\%/);
+                                    if (childMatch) {
+                                        const childName = childMatch[1].trim();
+                                        const childValue = parseFloat(childMatch[2]);
+                                        
+                                        subCategoryObj.children.push({
+                                            name: `${childName} (${childValue.toFixed(2)}%)`,
+                                            value: childValue,
+                                            color: categoryColors[childName] || getSubCategoryColor(subCategoryName, childName)
+                                        });
+                                    }
+                                    j++;
+                                }
+                                
+                                categoryObj.children.push(subCategoryObj);
+                                i = j - 1;
+                            }
+                            i++;
+                        }
+                        
+                        coreData.children.push(categoryObj);
+                    });
+                    
+                    coresData.push(coreData);
+                });
+                
+                return coresData;
+            }
+            
+            // 获取子类别颜色
+            function getSubCategoryColor(parentCategory, categoryName) {
+                const colorMap = {
+                    'Front-End Latency': '#FF9A3C',
+                    'Front End Bound Bandwidth': '#FFBB96',
+                    'Branch Mispredicts': '#9254DE',
+                    'Machine Clears': '#9254DE',
+                    'Resource Bound': '#FF4D4F',
+                    'Core Bound': '#FF7875',
+                    'Memory Bound': '#FF9C9C',
+                    'L1 Bound': '#FFBB96',
+                    'L2 Bound': '#FFD6B8',
+                    'L3 or DRAM Bound': '#FFF1E6',
+                    'Store Bound': '#FFE8D9'
+                };
+                
+                // 基础颜色映射
+                if (colorMap[categoryName]) {
+                    return colorMap[categoryName];
+                }
+                
+                // 根据父类别生成颜色
+                if (parentCategory.includes('Front')) {
+                    return '#FFB779';
+                } else if (parentCategory.includes('Speculation')) {
+                    return '#B388FF';
+                } else if (parentCategory.includes('Resource')) {
+                    return '#FF7875';
+                } else if (parentCategory.includes('Core')) {
+                    return '#FF9C9C';
+                } else if (parentCategory.includes('Memory')) {
+                    return '#FFBB96';
+                }
+                
+                // 默认颜色
+                return '#A0AEC0';
+            }
+            
+            // 渲染所有核的数据
+            function renderAllCores(coresData) {
+                coresContainer.innerHTML = '';
+                
+                coresData.forEach((coreData, index) => {
+                    const coreCard = document.createElement('div');
+                    coreCard.className = 'core-card bg-white rounded-xl overflow-hidden card-shadow hover-scale';
+                    
+                    coreCard.innerHTML = `
+                        <div class="p-5 border-b border-gray-100">
+                            <div class="flex justify-between items-center">
+                                <h2 class="text-xl font-semibold text-gray-800">${coreData.name}</h2>
+                                <div class="flex items-center">
+                                    <span class="text-sm text-gray-500 mr-2">IPC: ${coreData.ipc.toFixed(3)}</span>
+                                    <button class="toggle-details text-gray-400 hover:text-gray-600 transition-colors">
+                                        <i class="fa fa-chevron-down"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="mt-3 grid grid-cols-2 gap-2 text-sm">
+                                <div class="bg-gray-50 p-2 rounded">
+                                    <span class="text-gray-500">总指令数:</span>
+                                    <span class="font-medium">${formatNumber(coreData.totalInstructions)}</span>
+                                </div>
+                                <div class="bg-gray-50 p-2 rounded">
+                                    <span class="text-gray-500">总周期数:</span>
+                                    <span class="font-medium">${formatNumber(coreData.totalCycles)}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="core-details p-5">
+                            <div class="mb-6">
+                                <h3 class="text-lg font-medium text-gray-800 mb-3">总体分布</h3>
+                                <div class="topdown-chart h-64 mb-4">
+                                    <canvas id="core${index}-overall-chart"></canvas>
+                                </div>
+                                <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
+                                    ${generateSummaryLabels(coreData)}
+                                </div>
+                            </div>
+
+                            <h3 class="text-lg font-medium text-gray-800 mb-3">层次化分析</h3>
+                            <div class="h-96 overflow-auto">
+                                <div id="core${index}-treemap" class="h-full"></div>
+                            </div>
+                        </div>
+                    `;
+                    
+                    coresContainer.appendChild(coreCard);
+                    
+                    // 初始化图表
+                    setTimeout(() => {
+                        initOverallChart(index, coreData);
+                        createTreemapChart(`core${index}-treemap`, coreData);
+                    }, 100 * index); // 添加延迟，避免浏览器卡顿
+                });
+                
+                // 添加详情切换事件
+                document.querySelectorAll('.toggle-details').forEach(button => {
+                    button.addEventListener('click', function() {
+                        const details = this.closest('.core-card').querySelector('.core-details');
+                        const icon = this.querySelector('i');
+                        
+                        if (details.style.display === 'none') {
+                            details.style.display = 'block';
+                            icon.classList.remove('fa-chevron-right');
+                            icon.classList.add('fa-chevron-down');
+                        } else {
+                            details.style.display = 'none';
+                            icon.classList.remove('fa-chevron-down');
+                            icon.classList.add('fa-chevron-right');
+                        }
+                    });
+                });
+            }
+            
+            // 生成摘要标签
+            function generateSummaryLabels(coreData) {
+                const categories = coreData.children;
+                let html = '';
+                
+                categories.forEach(category => {
+                    const categoryName = category.name.split(' ')[0];
+                    const colorClass = category.color.replace('#', '');
+                    const bgColorClass = `bg-[#${colorClass}/10]`;
+                    const borderColorClass = `border-l-4 border-[#${colorClass}]`;
+                    const textColorClass = `text-[#${colorClass}]`;
+                    
+                    html += `
+                        <div class="${bgColorClass} p-2 rounded ${borderColorClass}">
+                            <span class="${textColorClass} font-medium">${categoryName}:</span>
+                            <span class="text-gray-700">${category.value.toFixed(2)}%</span>
+                        </div>
+                    `;
+                });
+                
+                return html;
+            }
+            
+            // 初始化总体分布图表
+            function initOverallChart(coreIndex, coreData) {
+                const ctx = document.getElementById(`core${coreIndex}-overall-chart`).getContext('2d');
+                
+                // 提取主要类别数据
+                const labels = coreData.children.map(c => c.name.split(' ')[0]);
+                const data = coreData.children.map(c => c.value);
+                const colors = coreData.children.map(c => c.color);
+                
+                new Chart(ctx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: labels,
+                        datasets: [{
+                            data: data,
+                            backgroundColor: colors,
+                            borderWidth: 0,
+                            hoverOffset: 10
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'right',
+                                labels: {
+                                    usePointStyle: true,
+                                    padding: 20,
+                                    font: {
+                                        size: 12
+                                    }
+                                }
+                            },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        const label = context.label || '';
+                                        const value = context.raw || 0;
+                                        return `${label}: ${value.toFixed(2)}%`;
+                                    }
+                                }
+                            }
+                        },
+                        cutout: '70%'
+                    }
+                });
+            }
+            
+            // 创建层次化矩形图（Treemap）
+            function createTreemapChart(elementId, data, colorMode = 'category') {
+                // 清除现有内容
+                document.getElementById(elementId).innerHTML = '';
+
+                // 创建SVG元素
+                const width = document.getElementById(elementId).offsetWidth;
+                const height = document.getElementById(elementId).offsetHeight;
+
+                const svg = d3.select(`#${elementId}`)
+                    .append('svg')
+                    .attr('width', width)
+                    .attr('height', height)
+                    .append('g');
+
+                // 创建分区函数
+                const treemap = d3.treemap()
+                    .size([width, height])
+                    .padding(1);
+
+                // 创建层次结构
+                const root = d3.hierarchy(data)
+                    .sum(d => d.value)
+                    .sort((a, b) => b.value - a.value);
+
+                // 计算矩形树图布局
+                treemap(root);
+
+                // 为不同配色模式定义颜色方案
+                let color;
+                if (colorMode === 'category') {
+                    // 按类别配色
+                    color = d => d.data.color || d3.scaleOrdinal(d3.quantize(d3.interpolateRainbow, data.children.length + 1))(d.data.name);
+                } else {
+                    // 按强度配色
+                    color = d => d3.scaleSequential(d3.interpolateReds)(d.depth / 5);
+                }
+
+                // 添加矩形
+                const cell = svg.selectAll('g')
+                    .data(root.descendants())
+                    .enter()
+                    .append('g')
+                    .attr('transform', d => `translate(${d.x0},${d.y0})`);
+
+                // 添加矩形背景
+                const rect = cell.append('rect')
+                    .attr('width', d => d.x1 - d.x0)
+                    .attr('height', d => d.y1 - d.y0)
+                    .attr('fill', d => color(d))
+                    .attr('stroke', '#fff')
+                    .attr('stroke-width', 1.5)
+                    .style('cursor', d => d.children ? 'pointer' : 'default')
+                    .on('click', (event, d) => {
+                        // 如果有子节点，则展开/折叠
+                        if (d.children) {
+                            // 切换展开/折叠状态
+                            d.children = d.children ? null : (d._children || data.children);
+                            
+                            // 重新绘制图表
+                            createTreemapChart(elementId, data, colorMode);
+                        }
+                    })
+                    .on('mouseover', function(event, d) {
+                        // 高亮当前矩形
+                        d3.select(this)
+                            .attr('stroke-width', 3);
+                        
+                        // 移除已存在的工具提示，防止重复
+                        d3.select('#treemap-tooltip').remove();
+
+                        // 显示工具提示
+                        const tooltip = d3.select('body')
+                            .append('div')
+                            .attr('id', 'treemap-tooltip') // 为工具提示添加ID
+                            .attr('class', 'absolute bg-gray-800 text-white text-sm p-2 rounded shadow-lg z-50')
+                            .style('pointer-events', 'none')
+                            .html(`
+                                <div class="font-medium">${d.data.name}</div>
+                                <div>占比: ${d.value.toFixed(2)}%</div>
+                                ${d.parent ? `<div class="text-xs text-gray-300">父类别: ${d.parent.data.name.split(' (')[0]}</div>` : ''}
+                            `);
+                        
+                        // 定位工具提示
+                        tooltip.style('left', (event.pageX + 10) + 'px')
+                            .style('top', (event.pageY - 28) + 'px');
+                    })
+                    .on('mousemove', function(event) {
+                        // 移动工具提示
+                        d3.select('body').select('div:last-child')
+                            .style('left', (event.pageX + 10) + 'px')
+                            .style('top', (event.pageY - 28) + 'px');
+                    })
+                    .on('mouseout', function() {
+                        // 恢复矩形样式
+                        d3.select(this)
+                            .attr('stroke-width', 1.5);
+                        
+                        // 移除工具提示
+                        d3.select('#treemap-tooltip').remove(); // 使用ID精确移除
+                    });
+
+                // 添加文本标签
+                cell.append('text')
+                    .attr('x', 4)
+                    .attr('y', 16)
+                    .attr('fill', 'white')
+                    .attr('font-size', d => Math.min(12, (d.y1 - d.y0) / 3))
+                    .attr('pointer-events', 'none')
+                    .text(d => {
+                        // 只显示名称的第一部分，避免文本过长
+                        const name = d.data.name.split(' (')[0];
+                        // 计算文本宽度是否适合矩形
+                        const rectWidth = d.x1 - d.x0;
+                        const estimatedTextWidth = name.length * 6; // 粗略估计每个字符6px
+                        
+                        return estimatedTextWidth < rectWidth ? name : name.substring(0, Math.floor(rectWidth / 6)) + '...';
+                    });
+
+                // 添加展开/折叠按钮
+                cell.filter(d => d.children)
+                    .append('text')
+                    .attr('x', d => (d.x1 - d.x0) - 12)
+                    .attr('y', 16)
+                    .attr('fill', 'white')
+                    .attr('font-size', 10)
+                    .attr('pointer-events', 'none')
+                    .text('+');
+            }
+            
+            // 生成优化建议
+            function generateOptimizationSuggestions(coresData) {
+                const suggestionsContainer = document.getElementById('optimization-suggestions');
+                suggestionsContainer.innerHTML = '';
+                
+                // 分析所有核的数据，找出主要瓶颈
+                const bottlenecks = {
+                    frontend: 0,
+                    speculation: 0,
+                    retiring: 0,
+                    backend: 0,
+                    memory: 0
+                };
+                
+                coresData.forEach(core => {
+                    core.children.forEach(category => {
+                        if (category.name.includes('Front-End')) {
+                            bottlenecks.frontend += category.value;
+                        } else if (category.name.includes('Bad Speculation')) {
+                            bottlenecks.speculation += category.value;
+                        } else if (category.name.includes('Retiring')) {
+                            bottlenecks.retiring += category.value;
+                        } else if (category.name.includes('Back-End')) {
+                            bottlenecks.backend += category.value;
+                            
+                            // 检查内存瓶颈
+                            const memoryBound = category.children.find(c => c.name.includes('Memory'));
+                            if (memoryBound) {
+                                bottlenecks.memory += memoryBound.value;
+                            }
+                        }
+                    });
+                });
+                
+                // 归一化
+                Object.keys(bottlenecks).forEach(key => {
+                    bottlenecks[key] = bottlenecks[key] / coresData.length;
+                });
+                
+                // 找出最主要的三个瓶颈
+                const sortedBottlenecks = Object.entries(bottlenecks)
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 3);
+                
+                // 生成建议
+                const suggestionMap = {
+                    frontend: `
+                        <li class="flex items-start">
+                            <i class="fa fa-arrow-right text-xs text-primary mt-1.5 mr-2"></i>
+                            <span>前端瓶颈占比较高(平均${bottlenecks.frontend.toFixed(2)}%)，特别是指令缓存缺失，考虑优化代码布局和提高指令局部性</span>
+                        </li>
+                    `,
+                    speculation: `
+                        <li class="flex items-start">
+                            <i class="fa fa-arrow-right text-xs text-primary mt-1.5 mr-2"></i>
+                            <span>错误推测占比较高(平均${bottlenecks.speculation.toFixed(2)}%)，建议优化分支预测，减少分支误预测</span>
+                        </li>
+                    `,
+                    retiring: `
+                        <li class="flex items-start">
+                            <i class="fa fa-arrow-right text-xs text-primary mt-1.5 mr-2"></i>
+                            <span>执行效率有提升空间(平均${bottlenecks.retiring.toFixed(2)}%)，可以优化循环结构和算法复杂度</span>
+                        </li>
+                    `,
+                    backend: `
+                        <li class="flex items-start">
+                            <i class="fa fa-arrow-right text-xs text-primary mt-1.5 mr-2"></i>
+                            <span>当前系统主要瓶颈在后端(平均${bottlenecks.backend.toFixed(2)}%)，建议优化后端资源利用和核心调度</span>
+                        </li>
+                    `,
+                    memory: `
+                        <li class="flex items-start">
+                            <i class="fa fa-arrow-right text-xs text-primary mt-1.5 mr-2"></i>
+                            <span>内存访问瓶颈明显(平均${bottlenecks.memory.toFixed(2)}%)，建议优化内存访问模式，提高缓存命中率</span>
+                        </li>
+                    `
+                };
+                
+                sortedBottlenecks.forEach(([key, value]) => {
+                    if (suggestionMap[key]) {
+                        suggestionsContainer.innerHTML += suggestionMap[key];
+                    }
+                });
+            }
+            
+            // 全部展开/折叠按钮
+            document.getElementById('expand-all').addEventListener('click', function() {
+                document.querySelectorAll('.core-details').forEach(details => {
+                    details.style.display = 'block';
+                });
+                document.querySelectorAll('.toggle-details i').forEach(icon => {
+                    icon.classList.remove('fa-chevron-right');
+                    icon.classList.add('fa-chevron-down');
+                });
+                
+                // 展开所有树形图节点
+                allCoresData.forEach((coreData, index) => {
+                    expandAllNodes(coreData);
+                    createTreemapChart(`core${index}-treemap`, coreData, document.getElementById('color-mode').value);
+                });
+            });
+
+            document.getElementById('collapse-all').addEventListener('click', function() {
+                document.querySelectorAll('.core-details').forEach(details => {
+                    details.style.display = 'none';
+                });
+                document.querySelectorAll('.toggle-details i').forEach(icon => {
+                    icon.classList.remove('fa-chevron-down');
+                    icon.classList.add('fa-chevron-right');
+                });
+                
+                // 折叠所有树形图节点到一级
+                allCoresData.forEach((coreData, index) => {
+                    collapseAllNodes(coreData);
+                    createTreemapChart(`core${index}-treemap`, coreData, document.getElementById('color-mode').value);
+                });
+            });
+
+            // 递归展开所有节点
+            function expandAllNodes(node) {
+                if (node.children) {
+                    node.children.forEach(child => {
+                        expandAllNodes(child);
+                    });
+                }
+            }
+
+            // 递归折叠所有节点到一级
+            function collapseAllNodes(node) {
+                if (node.children) {
+                    // 保存子节点
+                    node._children = node.children;
+                    // 清空当前子节点
+                    node.children = null;
+                }
+            }
+
+            // 配色模式切换
+            document.getElementById('color-mode').addEventListener('change', function() {
+                const mode = this.value;
+                console.log('切换配色模式:', mode);
+                
+                // 重新创建所有图表以应用新的配色方案
+                allCoresData.forEach((coreData, index) => {
+                    createTreemapChart(`core${index}-treemap`, coreData, mode);
+                });
+            });
+            
+            // 工具函数
+            function formatFileSize(bytes) {
+                if (bytes === 0) return '0 Bytes';
+                
+                const k = 1024;
+                const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                
+                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+            }
+            
+            function formatNumber(num) {
+                return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+            }
+        });
+        
+        // 引入D3.js库
+        const script = document.createElement('script');
+        script.src = 'https://d3js.org/d3.v7.min.js';
+        document.head.appendChild(script);
+    </script>
+</body>
+</html>
