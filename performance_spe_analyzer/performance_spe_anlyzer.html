@@ -310,155 +310,158 @@
             // 解析topdown数据
             function parseTopdownData(content) {
                 const coresData = [];
-                const coreBlocks = content.split(/^\+{20,}/m).filter(block => block.trim());
-                
-                coreBlocks.forEach(block => {
-                    const lines = block.trim().split('\n');
+                const existingCoreIds = new Set(); // 用于跟踪已添加的核心ID
+
+                const categoryColors = {
+                    'Front-End Bound': '#FF7D00',
+                    'Bad Speculation': '#722ED1',
+                    'Retiring': '#0FC6C2',
+                    'Back-End Bound': '#F5222D',
+                    'Front-End Latency': '#FF9A3C',
+                    'Front End Bound Bandwidth': '#FFB779',
+                    'iTLB Miss': '#FFBB96',
+                    'iCache Miss': '#FFD6B8',
+                    'BP_Misp_Flush': '#FFA94D',
+                    'OoO Rob Flush': '#FFC078',
+                    'Static Predictor Flush': '#FFD8A8',
+                    'L1 iTLB Miss': '#FFC996',
+                    'L2 iTLB Miss': '#FFD6B8',
+                    'L1 iCache Miss': '#FFBB96',
+                    'L2 iCache Miss': '#FFD6B8',
+                    'Branch Mispredicts': '#9254DE',
+                    'Machine Clears': '#B388FF',
+                    'Resource Bound': '#FF4D4F',
+                    'Core Bound': '#FF7875',
+                    'Memory Bound': '#FF9C9C',
+                    'L1 Bound': '#FFBB96',
+                    'L2 Bound': '#FFD6B8',
+                    'L3 or DRAM Bound': '#FFF1E6',
+                    'Execution Ports': '#FF4D4F',
+                    'Load/Store Units': '#FF7875',
+                    'Register Pressure': '#FF9C9C',
+                    'Scheduler Pressure': '#FF7875',
+                    'Register File Pressure': '#FF9C9C',
+                    'ROB Pressure': '#FFBB96',
+                    'Conditional Branch': '#9254DE',
+                    'Indirect Branch': '#B388FF',
+                    'Call/Return': '#D0A1F0',
+                    'Load Port Starvation': '#B388FF',
+                    'Store Forwarding': '#D0A1F0',
+                    'Memory Ordering': '#E8C6FF',
+                    'Sync_stall': '#FFA94D',
+                    // Add other specific categories and their colors if needed
+                };
+
+                const coreHeaderRegex = /^---\s*core\s+(\d+)\s*---\s*$/gm;
+                let match;
+                const headerIndices = [];
+                while ((match = coreHeaderRegex.exec(content)) !== null) {
+                    headerIndices.push({ index: match.index, coreId: match[1], headerText: match[0] });
+                }
+
+                if (headerIndices.length === 0 && content.trim().length > 0 && content.includes("Top-down Microarchitecture Analysis Summary")) {
+                    console.warn("No core headers found in the format '--- core X ---'. Attempting to parse as single core.");
+                    // Simplified: treat entire content as for core '0' if no headers but summary is present
+                    headerIndices.push({ index: 0, coreId: '0', headerText: '--- core 0 --- (inferred)' });
+                }
+
+                for (let i = 0; i < headerIndices.length; i++) {
+                    const headerInfo = headerIndices[i];
+                    const coreId = headerInfo.coreId;
+
+                    if (existingCoreIds.has(coreId)) {
+                        console.warn(`Skipping duplicate core ID: ${coreId}`);
+                        continue;
+                    }
+                    existingCoreIds.add(coreId);
+
+                    const startIdx = headerInfo.index;
+                    const endIdx = (i + 1 < headerIndices.length) ? headerIndices[i+1].index : content.length;
                     
-                    // 提取核心编号
-                    const coreMatch = lines[0].match(/core\s+(\d+)/i);
-                    const coreId = coreMatch ? coreMatch[1] : '0';
+                    const blockContentForCore = content.substring(startIdx, endIdx);
+
+                    const summaryLineRegex = /^\+{20,}\s*Top-down Microarchitecture Analysis Summary\s*\+{20,}/m;
+                    const summaryMatch = summaryLineRegex.exec(blockContentForCore);
                     
-                    // 提取总体指标
-                    const totalInstructionsMatch = lines.find(l => l.includes('Total Execution Instruction'))?.match(/:\s*(\d+)/);
-                    const totalCyclesMatch = lines.find(l => l.includes('Total Execution Cycles'))?.match(/:\s*(\d+)/);
-                    const ipcMatch = lines.find(l => l.includes('Instructions Per Cycle'))?.match(/:\s*(\d+\.\d+)/);
+                    let dataForParsing = blockContentForCore;
+                    if (summaryMatch) {
+                        dataForParsing = blockContentForCore.substring(summaryMatch.index + summaryMatch[0].length);
+                    } else if (!blockContentForCore.trim().startsWith('---')) {
+                        // If no summary line AND block doesn't start with '---' (inferred case), assume data starts after first line (inferred header)
+                        dataForParsing = blockContentForCore.substring(blockContentForCore.indexOf('\n') + 1);
+                    } else if (blockContentForCore.trim().startsWith('---')){
+                        // If it starts with '---' but no summary line, data is after the header line
+                         dataForParsing = blockContentForCore.substring(blockContentForCore.indexOf('\n') + 1);
+                    }
+
+                    const footerPlusLineRegex = /^\s*\+{20,}\s*$/m;
+                    const dataLinesForMetrics = dataForParsing.split('\n').filter(line => {
+                        const trimmed = line.trim();
+                        return trimmed && !footerPlusLineRegex.test(trimmed) && !summaryLineRegex.test(trimmed);
+                    });
+
+                    const totalInstructionsMatch = dataLinesForMetrics.find(l => l.includes('Total Execution Instruction'))?.match(/:\s*(\d+)/);
+                    const totalCyclesMatch = dataLinesForMetrics.find(l => l.includes('Total Execution Cycles'))?.match(/:\s*(\d+)/);
+                    const ipcMatch = dataLinesForMetrics.find(l => l.includes('Instructions Per Cycle'))?.match(/:\s*(\d+\.\d+)/);
                     
                     const totalInstructions = totalInstructionsMatch ? parseInt(totalInstructionsMatch[1]) : 0;
                     const totalCycles = totalCyclesMatch ? parseInt(totalCyclesMatch[1]) : 0;
                     const ipc = ipcMatch ? parseFloat(ipcMatch[1]) : 0;
                     
-                    // 构建数据结构
                     const coreData = {
                         name: `Core ${coreId}`,
-                        value: 100,
+                        value: 100, 
                         totalInstructions,
                         totalCycles,
                         ipc,
                         children: []
                     };
-                    
-                    // 解析各个类别
-                    const categories = ['Front-End Bound', 'Bad Speculation', 'Retiring', 'Back-End Bound'];
-                    const categoryColors = {
-                        'Front-End Bound': '#FF7D00',
-                        'Bad Speculation': '#722ED1',
-                        'Retiring': '#0FC6C2',
-                        'Back-End Bound': '#F5222D',
-                        // 新增颜色定义
-                        'Front-End Latency': '#FF9A3C',
-                        'Front End Bound Bandwidth': '#FFB779',
-                        'iTLB Miss': '#FFBB96',
-                        'iCache Miss': '#FFD6B8',
-                        'BP_Misp_Flush': '#FFA94D',
-                        'OoO Rob Flush': '#FFC078',
-                        'Static Predictor Flush': '#FFD8A8',
-                        'L1 iTLB Miss': '#FFC996',
-                        'L2 iTLB Miss': '#FFD6B8',
-                        'L1 iCache Miss': '#FFBB96',
-                        'L2 iCache Miss': '#FFD6B8',
-                        'Branch Mispredicts': '#9254DE',
-                        'Machine Clears': '#B388FF',
-                        'Resource Bound': '#FF4D4F',
-                        'Core Bound': '#FF7875',
-                        'Memory Bound': '#FF9C9C',
-                        'L1 Bound': '#FFBB96',
-                        'L2 Bound': '#FFD6B8',
-                        'L3 or DRAM Bound': '#FFF1E6',
-                        'Execution Ports': '#FF4D4F',
-                        'Load/Store Units': '#FF7875',
-                        'Register Pressure': '#FF9C9C',
-                        'Scheduler Pressure': '#FF7875',
-                        'Register File Pressure': '#FF9C9C',
-                        'ROB Pressure': '#FFBB96',
-                        'Conditional Branch': '#9254DE',
-                        'Indirect Branch': '#B388FF',
-                        'Call/Return': '#D0A1F0',
-                        'Load Port Starvation': '#B388FF',
-                        'Store Forwarding': '#D0A1F0',
-                        'Memory Ordering': '#E8C6FF',
-                        'Sync_stall': '#FFA94D',
-                        'Rob_stall': '#FFBB96',
-                        'Ptag_stall': '#FFC996',
-                        'SaveOpQ_stall': '#FFD6B8',
-                        'PC_buffer_stall': '#FFE8D9',
-                        'Other_stall': '#FFF1E6',
-                        'Divider': '#FFA94D',
-                        'FSU_stall': '#FFBB96',
-                        'Exe Ports Util': '#FFC996',
-                        'ALU BRU IssueQ Full': '#FFD6B8',
-                        'LS IssueQ Full': '#FFE8D9',
-                        'FSU IssueQ Full': '#FFF1E6',
-                        'Nuke Flush': '#FFA94D',
-                        'Other Flush': '#FFBB96'
-                    };
-                    
-                    categories.forEach(category => {
-                        const categoryIndex = lines.findIndex(l => l.includes(category));
-                        if (categoryIndex === -1) return;
+
+                    let currentTopLevelCategory = null;
+                    const topLevelCategoryNames = ['Front-End Bound', 'Bad Speculation', 'Retiring', 'Back-End Bound'];
+
+                    dataLinesForMetrics.forEach(line => {
+                        const trimmedLine = line.trim();
+                        if (!trimmedLine || trimmedLine.startsWith('Total Execution') || trimmedLine.startsWith('Instructions Per Cycle')) return;
+
+                        const metricMatch = trimmedLine.match(/^(.*?):\s*([\d.]+)/);
+                        if (!metricMatch) return;
+
+                        let name = metricMatch[1].trim();
+                        const value = parseFloat(metricMatch[2]);
                         
-                        const categoryLine = lines[categoryIndex];
-                        const categoryValueMatch = categoryLine.match(/(\d+\.\d+)\%/);
-                        const categoryValue = categoryValueMatch ? parseFloat(categoryValueMatch[1]) : 0;
-                        
-                        const categoryObj = {
-                            name: `${category} (${categoryValue.toFixed(2)}%)`,
-                            value: categoryValue,
-                            color: categoryColors[category],
-                            children: []
-                        };
-                        
-                        // 解析子类别
-                        let i = categoryIndex + 1;
-                        while (i < lines.length && !lines[i].trim().startsWith('+') && !categories.some(c => lines[i].includes(c))) {
-                            const line = lines[i].trim();
-                            if (!line) {
-                                i++;
-                                continue;
-                            }
-                            
-                            // 检查是否有子类别
-                            const subCategoryMatch = line.match(/^\s+([\w\s\/\-]+)\:\s+(\d+\.\d+)\%/);
-                            if (subCategoryMatch) {
-                                const subCategoryName = subCategoryMatch[1].trim();
-                                const subCategoryValue = parseFloat(subCategoryMatch[2]);
-                                
-                                const subCategoryObj = {
-                                    name: `${subCategoryName} (${subCategoryValue.toFixed(2)}%)`,
-                                    value: subCategoryValue,
-                                    color: categoryColors[subCategoryName] || getSubCategoryColor(category, subCategoryName),
-                                    children: []
-                                };
-                                
-                                // 检查是否有更深层次的子类别
-                                let j = i + 1;
-                                while (j < lines.length && lines[j].trim().startsWith('        ')) {
-                                    const childLine = lines[j].trim();
-                                    const childMatch = childLine.match(/^\s+([\w\s\/\-]+)\:\s+(\d+\.\d+)\%/);
-                                    if (childMatch) {
-                                        const childName = childMatch[1].trim();
-                                        const childValue = parseFloat(childMatch[2]);
-                                        
-                                        subCategoryObj.children.push({
-                                            name: `${childName} (${childValue.toFixed(2)}%)`,
-                                            value: childValue,
-                                            color: categoryColors[childName] || getSubCategoryColor(subCategoryName, childName)
-                                        });
-                                    }
-                                    j++;
-                                }
-                                
-                                categoryObj.children.push(subCategoryObj);
-                                i = j - 1;
-                            }
-                            i++;
+                        // Determine if it's a top-level category based on name or indentation (simplification: check name first)
+                        let isTopLevel = topLevelCategoryNames.some(catName => name === catName);
+                        // A more robust indentation check would be: const indent = line.search(/\S|$/);
+                        // And then compare indent levels. For now, name check is primary for top-level.
+
+                        if (isTopLevel) {
+                            currentTopLevelCategory = {
+                                name: name,
+                                value: value,
+                                color: categoryColors[name] || '#A0AEC0',
+                                children: []
+                            };
+                            coreData.children.push(currentTopLevelCategory);
+                        } else if (currentTopLevelCategory) { // Assumes sub-categories follow a top-level one
+                            const subItem = {
+                                name: name,
+                                value: value,
+                                // color: getSubCategoryColor(currentTopLevelCategory.name, name) || '#cccccc', // getSubCategoryColor is defined later
+                                children: []
+                            };
+                            currentTopLevelCategory.children.push(subItem); 
+                            // This simple logic only handles one level of sub-categories under the *last* top-level.
+                            // A proper recursive parser or stack-based approach is needed for multi-level arbitrary nesting.
                         }
-                        
-                        coreData.children.push(categoryObj);
                     });
                     
-                    coresData.push(coreData);
-                });
+                    if (coreData.children.length > 0 || coreData.ipc > 0 || coreData.totalInstructions > 0) {
+                         coresData.push(coreData);
+                    } else {
+                        console.warn(`Core ${coreId} was not added as it had no parsed data.`);
+                    }
+                }
                 
                 return coresData;
             }
