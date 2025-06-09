@@ -7,6 +7,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
+        <script src="https://d3js.org/d3.v7.min.js"></script> <!-- D3.js added here -->
     <script>
         tailwind.config = {
             theme: {
@@ -1118,10 +1119,7 @@
             }
         });
         
-        // 引入D3.js库
-        const script = document.createElement('script');
-        script.src = 'https://d3js.org/d3.v7.min.js';
-        document.head.appendChild(script);
+        // Removed dynamic D3.js library introduction from here
     </script>
 </body>
 </html>
