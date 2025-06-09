@@ -608,15 +608,29 @@
                         if (nodeStack.length === 0) {
                             coreData.children.push(metricNode);
                         } else {
+                            // This is the block if (nodeStack.length > 0)
                             const parentStackEntry = nodeStack[nodeStack.length - 1];
-                            // Check if the parent entry and its 'node' property are valid
-                            if (parentStackEntry && parentStackEntry.node) {
-                                parentStackEntry.node.children.push(metricNode);
+                            // Safely retrieve the potential parent node.
+                            const potentialParentNode = parentStackEntry ? parentStackEntry.node : undefined;
+
+                            if (potentialParentNode) {
+                                // Parent node candidate exists. Now check its 'children' property.
+                                if (Array.isArray(potentialParentNode.children)) {
+                                    potentialParentNode.children.push(metricNode);
+                                } else {
+                                    // Parent node exists, but its 'children' property is not a valid array.
+                                    // This indicates a structural issue with the parent metricNode object.
+                                    console.warn('Parent node "' + potentialParentNode.name + '" found, but its "children" property is not an array. Adding node "' + metricNode.name + '" as a top-level item for the current core.');
+                                    coreData.children.push(metricNode);
+                                }
                             } else {
-                                // Fallback: If the parent entry on stack is corrupted (node is undefined),
-                                // add the current metricNode to the top-level children for this core.
-                                // This prevents the crash and allows parsing to continue.
-                                console.warn('Encountered a corrupted parent stack entry. Adding node "' + metricNode.name + '" as a top-level item for the current core.');
+                                // Fallback: The parent stack entry was corrupted (e.g., no 'node' property, or 'node' is null/undefined).
+                                // This should trigger the warning the user was previously asked about.
+                                let parentDescription = "unknown (parentStackEntry was falsy)";
+                                if (parentStackEntry) {
+                                    parentDescription = "defined but its .node property was falsy";
+                                }
+                                console.warn('Corrupted parent stack entry (' + parentDescription + '). Adding node "' + metricNode.name + '" as a top-level item for the current core.');
                                 coreData.children.push(metricNode);
                             }
                         }
