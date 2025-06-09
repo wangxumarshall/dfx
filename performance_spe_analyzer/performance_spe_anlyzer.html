@@ -245,12 +245,9 @@
                 }
             }
             
-            // 修复：添加点击事件监听器，触发文件选择对话框
-            fileLabel.addEventListener('click', function() {
-                fileInput.click();
-            });
-            
             // 处理文件选择
+            // Clicking the fileLabel will now rely on default browser behavior
+            // to trigger the change event on the nested fileInput.
             fileInput.addEventListener('change', function() {
                 if (this.files.length) {
                     handleFiles(this.files[0]);
