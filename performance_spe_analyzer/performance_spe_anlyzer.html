@@ -1,1146 +1,375 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Top-down分析数据可视化</title>
+    <title>RTOS V2X Top-down Microarchitecture Analysis</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
-        <script src="https://d3js.org/d3.v7.min.js"></script> <!-- D3.js added here -->
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        primary: '#165DFF',
-                        secondary: '#722ED1',
-                        frontend: '#FF7D00',
-                        frontend_latency: '#FF9A3C',
-                        frontend_bandwidth: '#FFB779',
-                        speculation: '#722ED1',
-                        branch: '#9254DE',
-                        machine: '#B388FF',
-                        retiring: '#0FC6C2',
-                        backend: '#F5222D',
-                        resource: '#FF4D4F',
-                        core: '#FF7875',
-                        memory: '#FF9C9C',
-                        l1: '#FFBB96',
-                        l2: '#FFD6B8',
-                        l3: '#FFF1E6',
-                        store: '#FFE8D9',
-                    },
-                    fontFamily: {
-                        inter: ['Inter', 'system-ui', 'sans-serif'],
-                    },
-                }
-            }
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        html, body {
+            height: 100%;
         }
-    </script>
-    <style type="text/tailwindcss">
-        @layer utilities {
-            .content-auto {
-                content-visibility: auto;
-            }
-            .card-shadow {
-                box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-            }
-            .hover-scale {
-                transition: transform 0.3s ease;
-            }
-            .hover-scale:hover {
-                transform: scale(1.02);
-            }
-            .grid-auto-fit {
-                grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            }
-            .drop-zone {
-                border: 2px dashed #e2e8f0;
-                border-radius: 8px;
-                padding: 2rem;
-                text-align: center;
-                cursor: pointer;
-                transition: all 0.3s ease;
-            }
-            .drop-zone:hover {
-                background-color: #f8fafc;
-            }
-            .drop-zone.active {
-                border-color: #165DFF;
-                background-color: #edf2f7;
-            }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+        .metric-card {
+            background-color: white;
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+        .partition-level {
+            display: flex;
+            width: 100%;
+            flex-grow: 1; /* Allow levels to take up space */
+        }
+        .partition-node {
+            box-sizing: border-box;
+            border: 2px solid white;
+            padding: 0.5rem;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            color: white;
+            font-weight: 600;
+            transition: all 0.3s ease-in-out;
+            overflow: hidden;
+            word-wrap: break-word;
+        }
+        .partition-node.has-children {
+            cursor: pointer;
+        }
+        .partition-node.has-children:hover {
+            transform: scale(1.02);
+            z-index: 10;
+        }
+        .partition-node.active {
+            border-color: #4f46e5;
+            box-shadow: 0 0 10px rgba(79, 70, 229, 0.5);
         }
     </style>
 </head>
-<body class="bg-gray-50 font-inter text-gray-800">
-    <div class="container mx-auto px-4 py-8">
-        <header class="mb-12 text-center">
-            <h1 class="text-[clamp(1.8rem,4vw,2.5rem)] font-bold text-gray-800 mb-3">CPU Top-down分析数据可视化</h1>
-            <p class="text-gray-600 max-w-3xl mx-auto">通过层次化矩形图直观展示每个CPU核的性能分析数据，清晰呈现各组件的占比关系</p>
-        </header>
+<body class="p-0">
+    <div class="flex flex-col h-full w-full p-4 md:p-8">
+        <!-- Top section: Title, file input, and summary cards -->
+        <div>
+            <h1 class="text-3xl font-bold text-gray-800 mb-6 text-center">RTOS V2X Top-down Microarchitecture Analysis</h1>
 
-        <!-- 文件上传区域 -->
-        <div class="mb-8">
-            <div id="dropZone" class="drop-zone">
-                <div class="flex flex-col items-center justify-center">
-                    <i class="fa fa-file-text-o text-4xl text-gray-400 mb-3"></i>
-                    <p class="text-gray-600 mb-2">拖放topdown分析文本文件到此处，或</p>
-                    <label id="fileLabel" class="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-md transition-all duration-300 cursor-pointer">
-                        <i class="fa fa-upload mr-2"></i>选择文件
-                        <input type="file" id="fileInput" accept=".txt" class="hidden">
-                    </label>
-                    <p class="text-gray-400 text-sm mt-3">支持的格式：.txt</p>
+            <div class="metric-card mb-6">
+                <h2 class="text-xl font-semibold text-gray-700 mb-3">导入SPE性能数据【仅支持RTOSV2X hiperf SPE数据格式】<a href="https://wiki.huawei.com/domains/12565/wiki/179215/WIKI202506107091265" class="text-indigo-600 hover:underline">[微架构数据采集]</a></h2>
+                <div class="flex items-center space-x-4">
+                    <input type="file" id="fileInput" accept=".txt,.log" class="block w-full text-sm text-gray-500
+                        file:mr-4 file:py-2 file:px-4
+                        file:rounded-full file:border-0
+                        file:text-sm file:font-semibold
+                        file:bg-indigo-50 file:text-indigo-700
+                        hover:file:bg-indigo-100
+                    "/>
+                     <button id="analyzeBtn" class="px-6 py-2 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-75">分析</button>
                 </div>
             </div>
-            <div id="fileInfo" class="hidden mt-4 p-3 bg-gray-50 rounded-md border border-gray-200">
-                <div class="flex items-center">
-                    <i class="fa fa-file-text-o text-primary mr-3"></i>
-                    <div>
-                        <p id="fileName" class="font-medium text-gray-800"></p>
-                        <p id="fileSize" class="text-sm text-gray-500"></p>
-                    </div>
-                    <button id="removeFile" class="ml-auto text-gray-400 hover:text-gray-600">
-                        <i class="fa fa-times"></i>
-                    </button>
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+                <div class="metric-card text-center">
+                    <h2 class="text-lg font-semibold text-gray-600">Total Instructions</h2>
+                    <p id="total-instructions" class="text-3xl font-bold text-indigo-600">-</p>
                 </div>
-            </div>
-        </div>
-
-        <div class="mb-8 flex flex-wrap justify-between items-center">
-            <div class="mb-4 md:mb-0">
-                <button id="expand-all" class="bg-primary hover:bg-primary/90 text-white px-4 py-2 rounded-md mr-2 transition-all duration-300 flex items-center" disabled>
-                    <i class="fa fa-expand mr-2"></i>全部展开
-                </button>
-                <button id="collapse-all" class="bg-gray-200 hover:bg-gray-300 text-gray-700 px-4 py-2 rounded-md transition-all duration-300 flex items-center" disabled>
-                    <i class="fa fa-compress mr-2"></i>全部折叠
-                </button>
-            </div>
-            <div class="flex items-center">
-                <label for="color-mode" class="mr-2 text-gray-700">配色模式:</label>
-                <select id="color-mode" class="bg-white border border-gray-300 rounded-md px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/50" disabled>
-                    <option value="category">按类别</option>
-                    <option value="intensity">按强度</option>
-                </select>
-            </div>
-        </div>
-
-        <div id="cores-container" class="grid grid-auto-fit gap-6">
-            <!-- 核数据将通过JavaScript动态生成 -->
-        </div>
-
-        <div id="no-data-message" class="py-12 text-center">
-            <div class="inline-flex items-center justify-center w-16 h-16 rounded-full bg-gray-100 mb-4">
-                <i class="fa fa-bar-chart text-2xl text-gray-400"></i>
-            </div>
-            <h3 class="text-xl font-medium text-gray-800 mb-2">未上传数据文件</h3>
-            <p class="text-gray-500 max-w-md mx-auto">请上传topdown分析文本文件，以可视化展示CPU微架构性能数据</p>
-        </div>
-
-        <div class="mt-12 hidden" id="analysis-section">
-            <h2 class="text-xl font-semibold text-gray-800 mb-4">分析说明</h2>
-            <div class="bg-white rounded-xl p-6 card-shadow">
-                <div class="grid md:grid-cols-2 gap-6">
-                    <div>
-                        <h3 class="font-medium text-gray-800 mb-2 flex items-center">
-                            <i class="fa fa-info-circle text-primary mr-2"></i>Top-down分析方法
-                        </h3>
-                        <p class="text-gray-600 mb-4">Top-down分析是一种微架构性能分析方法，将处理器性能分解为多个层次的指标，帮助识别性能瓶颈。</p>
-                        
-                        <h3 class="font-medium text-gray-800 mb-2 flex items-center">
-                            <i class="fa fa-pie-chart text-primary mr-2"></i>图表解读
-                        </h3>
-                        <ul class="text-gray-600 space-y-2 mb-4">
-                            <li class="flex items-start">
-                                <i class="fa fa-circle text-xs text-frontend mt-1.5 mr-2"></i>
-                                <span>前端瓶颈：指令获取和译码阶段的性能损耗</span>
-                            </li>
-                            <li class="flex items-start">
-                                <i class="fa fa-circle text-xs text-speculation mt-1.5 mr-2"></i>
-                                <span>错误推测：分支预测错误和机器清空导致的性能损耗</span>
-                            </li>
-                            <li class="flex items-start">
-                                <i class="fa fa-circle text-xs text-retiring mt-1.5 mr-2"></i>
-                                <span>执行阶段：指令实际执行的效率</span>
-                            </li>
-                            <li class="flex items-start">
-                                <i class="fa fa-circle text-xs text-backend mt-1.5 mr-2"></i>
-                                <span>后端瓶颈：资源、核心和内存访问相关的性能损耗</span>
-                            </li>
-                        </ul>
-                    </div>
-                    
-                    <div>
-                        <h3 class="font-medium text-gray-800 mb-2 flex items-center">
-                            <i class="fa fa-lightbulb-o text-primary mr-2"></i>性能优化建议
-                        </h3>
-                        <ul class="text-gray-600 space-y-2" id="optimization-suggestions">
-                            <!-- 建议将通过JavaScript动态生成 -->
-                        </ul>
-                    </div>
+                <div class="metric-card text-center">
+                    <h2 class="text-lg font-semibold text-gray-600">Total Cycles</h2>
+                    <p id="total-cycles" class="text-3xl font-bold text-indigo-600">-</p>
+                </div>
+                <div class="metric-card text-center">
+                    <h2 class="text-lg font-semibold text-gray-600">Instructions Per Cycle (IPC)</h2>
+                    <p id="ipc" class="text-3xl font-bold text-indigo-600">-</p>
                 </div>
             </div>
         </div>
 
-        <footer class="mt-12 text-center text-gray-500 text-sm">
-            <p>© 2025 CPU性能分析可视化工具 | 数据更新日期: 2025-06-09</p>
-        </footer>
+        <!-- Chart Section: This will grow to fill remaining space -->
+        <div class="metric-card flex-grow flex flex-col">
+            <div id="partition-chart" class="flex-grow flex flex-col">
+                 <div id="placeholder" class="text-center text-gray-500 flex items-center justify-center h-full">
+                    请上传您的性能数据文件以开始分析。
+                </div>
+            </div>
+        </div>
+
     </div>
 
     <script>
-        // 全局变量存储所有核的数据
-        let allCoresData = [];
-        
-        // 初始化事件监听
-        document.addEventListener('DOMContentLoaded', function() {
-            const dropZone = document.getElementById('dropZone');
-            const fileInput = document.getElementById('fileInput');
-            const fileLabel = document.getElementById('fileLabel'); // 获取文件选择按钮标签
-            const fileInfo = document.getElementById('fileInfo');
-            const fileName = document.getElementById('fileName');
-            const fileSize = document.getElementById('fileSize');
-            const removeFile = document.getElementById('removeFile');
-            const coresContainer = document.getElementById('cores-container');
-            const noDataMessage = document.getElementById('no-data-message');
-            const analysisSection = document.getElementById('analysis-section');
-            const expandAllBtn = document.getElementById('expand-all');
-            const collapseAllBtn = document.getElementById('collapse-all');
-            const colorModeSelect = document.getElementById('color-mode');
-            
-            // 拖放事件
-            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
-                dropZone.addEventListener(eventName, preventDefaults, false);
-            });
-            
-            function preventDefaults(e) {
-                e.preventDefault();
-                e.stopPropagation();
-            }
-            
-            ['dragenter', 'dragover'].forEach(eventName => {
-                dropZone.addEventListener(eventName, highlight, false);
-            });
-            
-            ['dragleave', 'drop'].forEach(eventName => {
-                dropZone.addEventListener(eventName, unhighlight, false);
-            });
-            
-            function highlight() {
-                dropZone.classList.add('active');
-            }
-            
-            function unhighlight() {
-                dropZone.classList.remove('active');
-            }
-            
-            // 处理文件拖放
-            dropZone.addEventListener('drop', handleDrop, false);
-            
-            function handleDrop(e) {
-                const dt = e.dataTransfer;
-                const files = dt.files;
-                
-                if (files.length) {
-                    handleFiles(files[0]);
-                }
-            }
-            
-            // 处理文件选择
-            // Clicking the fileLabel will now rely on default browser behavior
-            // to trigger the change event on the nested fileInput.
-            fileInput.addEventListener('change', function() {
-                if (this.files.length) {
-                    handleFiles(this.files[0]);
-                }
-            });
-            
-            // 移除文件
-            removeFile.addEventListener('click', function() {
-                fileInput.value = '';
-                fileInfo.classList.add('hidden');
-                coresContainer.innerHTML = '';
-                noDataMessage.classList.remove('hidden');
-                analysisSection.classList.add('hidden');
-                allCoresData = [];
-                
-                // 禁用按钮
-                expandAllBtn.disabled = true;
-                collapseAllBtn.disabled = true;
-                colorModeSelect.disabled = true;
-            });
-            
-            // 处理文件
-            function handleFiles(file) {
-                if (!file.name.endsWith('.txt')) {
-                    alert('请上传文本文件 (.txt)');
-                    return;
-                }
-                
-                // 显示文件信息
-                fileName.textContent = file.name;
-                fileSize.textContent = formatFileSize(file.size);
-                fileInfo.classList.remove('hidden');
-                
-                // 读取文件内容
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    const content = e.target.result;
-                    allCoresData = parseTopdownData(content);
-                    
-                    // 渲染所有核的数据
-                    renderAllCores(allCoresData);
-                    
-                    // 显示分析部分
-                    noDataMessage.classList.add('hidden');
-                    analysisSection.classList.remove('hidden');
-                    
-                    // 启用按钮
-                    expandAllBtn.disabled = false;
-                    collapseAllBtn.disabled = false;
-                    colorModeSelect.disabled = false;
-                    
-                    // 生成优化建议
-                    generateOptimizationSuggestions(allCoresData);
-                };
-                reader.readAsText(file);
-            }
-
-            // 解析topdown数据
-            function parseTopdownData(content) {
-                const coresData = [];
-                const existingCoreIds = new Set(); // 用于跟踪已添加的核心ID
-
-                const categoryColors = {
-                    'Front-End Bound': '#FF7D00',
-                    'Bad Speculation': '#722ED1',
-                    'Retiring': '#0FC6C2',
-                    'Back-End Bound': '#F5222D',
-                    'Front-End Latency': '#FF9A3C',
-                    'Front End Bound Bandwidth': '#FFB779', // Corrected from 'Front End Bound Bandwidth' to match data
-                    'iTLB Miss': '#FFBB96',
-                    'iCache Miss': '#FFD6B8',
-                    'BP_Misp_Flush': '#FFA94D',
-                    'OoO Rob Flush': '#FFC078',
-                    'Static Predictor Flush': '#FFD8A8',
-                    'L1 iTLB Miss': '#FFC996',
-                    'L2 iTLB Miss': '#FFD6B8',
-                    'L1 iCache Miss': '#FFBB96', // Example, might need specific color
-                    'L2 iCache Miss': '#FFD6B8', // Example, might need specific color
-                    'Branch Mispredicts': '#9254DE',
-                    'Machine Clears': '#B388FF',
-                    'Resource Bound': '#FF4D4F',
-                    'Core Bound': '#FF7875',
-                    'Memory Bound': '#FF9C9C',
-                    'L1 Bound': '#FFBB96',
-                    'L2 Bound': '#FFD6B8',
-                    'L3 or DRAM Bound': '#FFF1E6',
-                    'Execution Ports': '#FF4D4F',
-                    'Load/Store Units': '#FF7875',
-                    'Register Pressure': '#FF9C9C',
-                    'Scheduler Pressure': '#FF7875',
-                    'Register File Pressure': '#FF9C9C',
-                    'ROB Pressure': '#FFBB96',
-                    'Conditional Branch': '#9254DE',
-                    'Indirect Branch': '#B388FF',
-                    'Call/Return': '#D0A1F0',
-                    'Load Port Starvation': '#B388FF',
-                    'Store Forwarding': '#D0A1F0',
-                    'Memory Ordering': '#E8C6FF',
-                    'Sync_stall': '#FFA94D',
-                    // Add other specific categories and their colors if needed
-                };
-
-                function getIndentLevel(line) {
-                    const match = line.match(/^(\s*)/);
-                    return match ? match[1].length : 0;
-                }
-
-                // Standard indent unit (e.g., 8 spaces for the provided example)
-                // This needs to be determined or assumed from the input format.
-                // If it's variable, the logic might need to be more adaptive.
-                // For now, let's try to infer it or use a common default.
-                let primaryIndentAmount = 0;
-
-
-                const coreHeaderRegex = /^---\s*core\s+(\d+)\s*---\s*$/gm;
-                let match;
-                const headerIndices = [];
-                while ((match = coreHeaderRegex.exec(content)) !== null) {
-                    headerIndices.push({ index: match.index, coreId: match[1], headerText: match[0] });
-                }
-
-                if (headerIndices.length === 0 && content.trim().length > 0 && content.includes("Top-down Microarchitecture Analysis Summary")) {
-                    console.warn("No core headers found in the format '--- core X ---'. Attempting to parse as single core.");
-                    // Simplified: treat entire content as for core '0' if no headers but summary is present
-                    headerIndices.push({ index: 0, coreId: '0', headerText: '--- core 0 --- (inferred)' });
-                }
-
-                for (let i = 0; i < headerIndices.length; i++) {
-                    const headerInfo = headerIndices[i];
-                    const coreId = headerInfo.coreId;
-
-                    if (existingCoreIds.has(coreId)) {
-                        console.warn(`Skipping duplicate core ID: ${coreId}`);
-                        continue;
+        function parsePerfData(data) {
+            const events = {};
+            const lines = data.trim().split('\n');
+            lines.forEach(line => {
+                const parts = line.trim().split(/\s+/);
+                if (parts.length >= 2) {
+                    const value = parseFloat(parts[0].replace(/,/g, ''));
+                    let key = parts[1];
+                    if (key.startsWith('r')) {
+                       const hexPart = key.substring(1);
+                       key = 'r' + hexPart.padStart(4, '0');
                     }
-                    existingCoreIds.add(coreId);
+                    events[key] = value;
+                }
+            });
+            return events;
+        }
 
-                    const startIdx = headerInfo.index;
-                    const endIdx = (i + 1 < headerIndices.length) ? headerIndices[i+1].index : content.length;
-                    
-                    const blockContentForCore = content.substring(startIdx, endIdx);
-
-                    const summaryLineRegex = /^\+{20,}\s*Top-down Microarchitecture Analysis Summary\s*\+{20,}/m;
-                    const summaryMatch = summaryLineRegex.exec(blockContentForCore);
-                    
-                    let dataForParsing = blockContentForCore;
-                    if (summaryMatch) {
-                        dataForParsing = blockContentForCore.substring(summaryMatch.index + summaryMatch[0].length);
-                    } else if (!blockContentForCore.trim().startsWith('---')) {
-                        // If no summary line AND block doesn't start with '---' (inferred case), assume data starts after first line (inferred header)
-                        dataForParsing = blockContentForCore.substring(blockContentForCore.indexOf('\n') + 1);
-                    } else if (blockContentForCore.trim().startsWith('---')){
-                        // If it starts with '---' but no summary line, data is after the header line
-                         dataForParsing = blockContentForCore.substring(blockContentForCore.indexOf('\n') + 1);
-                    }
-
-                    const footerPlusLineRegex = /^\s*\+{20,}\s*$/m;
-                    const dataLinesForMetrics = dataForParsing.split('\n').filter(line => {
-                        const trimmed = line.trim();
-                        return trimmed && !footerPlusLineRegex.test(trimmed) && !summaryLineRegex.test(trimmed);
-                    });
-
-                    const totalInstructionsMatch = dataLinesForMetrics.find(l => l.includes('Total Execution Instruction'))?.match(/:\s*(\d+)/);
-                    const totalCyclesMatch = dataLinesForMetrics.find(l => l.includes('Total Execution Cycles'))?.match(/:\s*(\d+)/);
-                    const ipcMatch = dataLinesForMetrics.find(l => l.includes('Instructions Per Cycle'))?.match(/:\s*(\d+\.\d+)/);
-                    
-                    const totalInstructions = totalInstructionsMatch ? parseInt(totalInstructionsMatch[1]) : 0;
-                    const totalCycles = totalCyclesMatch ? parseInt(totalCyclesMatch[1]) : 0;
-                    const ipc = ipcMatch ? parseFloat(ipcMatch[1]) : 0;
-                    
-                    const coreData = {
-                        name: `Core ${coreId}`,
-                        value: 100, // Represents the whole core for treemap purposes
-                        totalInstructions,
-                        totalCycles,
-                        ipc,
-                        children: []
-                    };
-
-                    const parentStack = []; // To keep track of parent nodes
-                    let lastNode = null; // To keep track of the last added node at any level
-
-                    // Determine the primary indent amount from the first few indented lines if not already set
-                    if (primaryIndentAmount === 0) {
-                        for (const line of dataLinesForMetrics) {
-                            const indent = getIndentLevel(line);
-                            if (indent > 0) {
-                                primaryIndentAmount = indent;
-                                console.log(`Inferred primary indent amount: ${primaryIndentAmount}`);
-                                break;
-                            }
-                        }
-                        if (primaryIndentAmount === 0) primaryIndentAmount = 8; // Default if no indented lines found
-                    }
-
-
-                    dataLinesForMetrics.forEach(line => {
-                        const trimmedLine = line.trim();
-                        if (!trimmedLine || trimmedLine.startsWith('Total Execution') || trimmedLine.startsWith('Instructions Per Cycle')) {
-                            return;
-                        }
-
-                        const metricMatch = trimmedLine.match(/^(.*?):\s*([\d.]+)/);
-                        if (!metricMatch) {
-                            return;
-                        }
-
-                        const name = metricMatch[1].trim();
-                        const value = parseFloat(metricMatch[2]);
-                        const currentIndent = getIndentLevel(line);
-
-                        const metricNode = {
-                            name: name,
-                            value: value,
-                            color: categoryColors[name] || getSubCategoryColor(parentStack.length > 0 ? parentStack[parentStack.length - 1].name : 'Core', name) || '#A0AEC0',
-                            children: []
-                        };
-
-                        if (parentStack.length === 0) { // Top-level item
-                            if (currentIndent === 0 || (primaryIndentAmount > 0 && currentIndent < primaryIndentAmount) || coreData.children.length === 0) {
-                                coreData.children.push(metricNode);
-                            } else { // Should be a child of the last top-level or an error in format
-                                 // This case implies an indented line without a clear top-level parent yet,
-                                 // or inconsistent indentation. For robustness, add to last available parent or coreData.
-                                if (coreData.children.length > 0) {
-                                    const potentialParent = coreData.children[coreData.children.length -1];
-                                     // Check if this new node is a child of the last added node to coreData
-                                    if (currentIndent > getIndentLevel(potentialParent.name)) { // Simplified check, assuming name carries original line for indent
-                                         parentStack.push(potentialParent);
-                                         potentialParent.children.push(metricNode);
-                                    } else { // Sibling or error
-                                        coreData.children.push(metricNode);
-                                    }
-                                } else {
-                                     coreData.children.push(metricNode); // First item, must be top-level
-                                }
-                            }
-                        } else { // Item is nested
-                            let expectedParentIndent = getIndentLevel(parentStack[parentStack.length - 1].name); // This is problematic, parent name doesn't have indent.
-                                                                                                              // We need to store indent with nodes on stack or infer.
-
-                            // Let's re-evaluate based on the stack's knowledge of indent levels.
-                            // The parentStack should store objects like {node: metricNode, indent: indentLevel}
-                            // For now, we'll use a simpler logic based on currentIndent vs stack's implied indent.
-                            // The indent of a parent is implicitly less than its children.
-
-                            // Simplified: Use primaryIndentAmount to judge levels
-                            let currentLevel = primaryIndentAmount > 0 ? Math.floor(currentIndent / primaryIndentAmount) : 0;
-                            let stackTopLevel = parentStack.length -1;
-
-
-                            while (parentStack.length > 0 && currentLevel <= (parentStack[parentStack.length-1].indentLvl || 0) ) {
-                                 // currentLevel is an integer representing depth.
-                                 // parentStack top element's indentLvl should be its depth.
-                                parentStack.pop();
-                            }
-
-                            if (parentStack.length === 0) { // Popped all the way, new top-level item (or sibling to first level)
-                                coreData.children.push(metricNode);
-                            } else {
-                                parentStack[parentStack.length - 1].node.children.push(metricNode);
-                            }
-                        }
-
-                        // Prepare for next iteration: Push current node onto stack if it might be a parent
-                        // This needs to be more robust. A node becomes a parent if the *next* node is indented further.
-                        // The current logic adds to parent, then decides if current node *becomes* the new parent on stack.
-
-                        // Revised stack management:
-                        // After adding metricNode, determine if it should be the new parent context on the stack.
-                        // This happens if subsequent lines could be its children.
-                        // We store { node: metricNode, indentLvl: currentLevel } on stack.
-
-                        // Remove previous logic for pushing to stack here.
-                        // Instead, when a line is MORE indented than previous, the PREVIOUS node becomes a parent.
-
-                        // Let's try a more direct parent finding based on indent levels.
-                        // This part is complex and needs the correct stack management.
-                        // For now, we'll use a simplified stack logic based on the example's fixed indent.
-
-                        // On second thought, a traditional stack approach:
-                        // 1. Calculate current indent.
-                        // 2. While stack not empty AND currentIndent <= indent of stack.top: pop stack.
-                        // 3. If stack empty: add to coreData.children.
-                        // 4. Else: add to stack.top.children.
-                        // 5. Push current node (and its indent) to stack.
-
-                        // This requires storing indent with stack items.
-                        // Let's adjust the stack to store { node, indent }
-                        // The initial `parentStack` was just nodes.
-
-                        // The loop should be:
-                        // For each line:
-                        //   create node
-                        //   calculate indent
-                        //   while stack.top.indent >= currentIndent: stack.pop()
-                        //   if stack.empty: coreData.children.add(node) else: stack.top.children.add(node)
-                        //   stack.push({node, indent})
-                        // This is a common algorithm for list-to-tree conversion.
-
-                        // The following is a placeholder for the above logic, which needs to be implemented correctly.
-                        // The current code inside the forEach is a mix of ideas and not yet the final stack algorithm.
-                        // The critical part is that `parentStack.push` should happen correctly.
-
-                        // For the example:
-                        // "Front-End Bound" (indent 0) -> coreData.children, stack.push({FEB, 0})
-                        // "Front-End Latency" (indent 8) -> FEB.children, stack.push({FEL, 8})
-                        // "iTLB Miss" (indent 16) -> FEL.children, stack.push({iTLB, 16})
-                        // "L1 iTLB Miss" (indent 24) -> iTLB.children, stack.push({L1iTLB, 24})
-                        // "L2 iTLB Miss" (indent 24) -> (pop L1iTLB), iTLB.children, stack.push({L2iTLB, 24})
-                        // "iCache Miss" (indent 16) -> (pop L2iTLB, pop iTLB), FEL.children, stack.push({iCM, 16})
-                        // "Front End Bound Bandwidth" (indent 8) -> (pop iCM, pop FEL), FEB.children, stack.push({FEBB, 8})
-
-                        // This requires the stack to store { node: metricNode, indent: currentIndent }
-                        // The logic for adding to parentStack and determining where to add children needs to be robust.
-                        // The current code in the diff is an intermediate step and will be refined.
-                        // The key change is the *intention* to use a proper stack method.
-                        // The actual complete refined logic will be in the next iteration if this diff is too complex.
-                        // For now, this sets up the structure for the stack-based approach.
-                        // The placeholder `parentStack.push({ node: metricNode, indentLvl: currentLevel });` is not fully correct yet.
-                    });
-                    
-                     // Refined parsing logic using a proper stack:
-                    const nodeStack = []; // Stores { node, indent }
-
-                    dataLinesForMetrics.forEach(line => {
-                        const trimmedLine = line.trim();
-                        if (!trimmedLine || trimmedLine.startsWith('Total Execution') || trimmedLine.startsWith('Instructions Per Cycle')) {
-                            return;
-                        }
-
-                        const metricMatch = trimmedLine.match(/^(.*?):\s*([\d.]+)/);
-                        if (!metricMatch) {
-                            return;
-                        }
-
-                        const name = metricMatch[1].trim();
-                        const value = parseFloat(metricMatch[2]);
-                        const currentIndent = getIndentLevel(line);
-
-                        const metricNode = {
-                            name: name,
-                            value: value,
-                            // Assign color based on its own name first. Fallback to parent's context if needed or generic.
-                            color: categoryColors[name] || getSubCategoryColor(nodeStack.length > 0 ? nodeStack[nodeStack.length - 1].node.name : 'Core', name) || '#A0AEC0',
-                            children: []
-                        };
-
-                        // Pop from stack until parent is found
-                        while (nodeStack.length > 0 && nodeStack[nodeStack.length - 1].indent >= currentIndent) {
-                            nodeStack.pop();
-                        }
-
-                        // Add to parent (either on stack or coreData)
-                        if (nodeStack.length === 0) {
-                            coreData.children.push(metricNode);
-                        } else {
-                            // This is the block if (nodeStack.length > 0)
-                            const parentStackEntry = nodeStack[nodeStack.length - 1];
-                            // Safely retrieve the potential parent node.
-                            const potentialParentNode = parentStackEntry ? parentStackEntry.node : undefined;
-
-                            if (potentialParentNode) {
-                                // Parent node candidate exists. Now check its 'children' property.
-                                if (Array.isArray(potentialParentNode.children)) {
-                                    potentialParentNode.children.push(metricNode);
-                                } else {
-                                    // Parent node exists, but its 'children' property is not a valid array.
-                                    // This indicates a structural issue with the parent metricNode object.
-                                    console.warn('Parent node "' + potentialParentNode.name + '" found, but its "children" property is not an array. Adding node "' + metricNode.name + '" as a top-level item for the current core.');
-                                    coreData.children.push(metricNode);
-                                }
-                            } else {
-                                // Fallback: The parent stack entry was corrupted (e.g., no 'node' property, or 'node' is null/undefined).
-                                // This should trigger the warning the user was previously asked about.
-                                let parentDescription = "unknown (parentStackEntry was falsy)";
-                                if (parentStackEntry) {
-                                    parentDescription = "defined but its .node property was falsy";
-                                }
-                                console.warn('Corrupted parent stack entry (' + parentDescription + '). Adding node "' + metricNode.name + '" as a top-level item for the current core.');
-                                coreData.children.push(metricNode);
-                            }
-                        }
-
-                        // Push current node onto stack
-                        nodeStack.push({ node: metricNode, indent: currentIndent });
-                    });
-
-
-                    if (coreData.children.length > 0 || coreData.ipc > 0 || coreData.totalInstructions > 0) {
-                         coresData.push(coreData);
-                    } else {
-                        console.warn(`Core ${coreId} was not added as it had no parsed data.`);
+        function transformDataForChart(node, name) {
+            const children = [];
+            if (node.details) {
+                for (const key in node.details) {
+                    const childNode = node.details[key];
+                    if (typeof childNode === 'object' && childNode.value !== undefined && childNode.value > 0) {
+                        children.push(transformDataForChart(childNode, key));
+                    } else if (typeof childNode === 'number' && childNode > 0) {
+                         children.push({ name: key, value: childNode });
                     }
                 }
-                
-                return coresData;
             }
-            
-            // 获取子类别颜色 (can be simplified if direct assignment is preferred)
-            function getSubCategoryColor(parentCategoryName, categoryName) {
-                 // If categoryColors already handled it, this might be redundant or a fallback.
-                 // For now, keep its logic for unassigned colors.
-                const specificSubColors = { // More specific colors for sub-categories if not in main categoryColors
-                    'L1 iTLB Miss': '#FFC996',
-                    'L2 iTLB Miss': '#FFD6B8',
-                    // ... other specific sub-category colors if they aren't globally unique enough for categoryColors
-                };
-                if (specificSubColors[categoryName]) {
-                    return specificSubColors[categoryName];
-                }
+            const result = { name, value: node.value };
+            if (children.length > 0) {
+                result.children = children;
+            }
+            return result;
+        }
 
-                // Fallback based on parent, if any known pattern
-                if (parentCategoryName) {
-                    if (parentCategoryName.includes('Front-End Latency')) return '#FFB779'; // Example: child of Front-End Latency
-                    if (parentCategoryName.includes('iTLB Miss')) return '#FFD6B8'; // Example: child of iTLB Miss
-                }
-                return '#A0AEC0'; // Default fallback
-            }
-            
-            // 渲染所有核的数据
-            function renderAllCores(coresData) {
-                coresContainer.innerHTML = '';
-                
-                coresData.forEach((coreData, index) => {
-                    const coreCard = document.createElement('div');
-                    coreCard.className = 'core-card bg-white rounded-xl overflow-hidden card-shadow hover-scale';
-                    
-                    coreCard.innerHTML = `
-                        <div class="p-5 border-b border-gray-100">
-                            <div class="flex justify-between items-center">
-                                <h2 class="text-xl font-semibold text-gray-800">${coreData.name}</h2>
-                                <div class="flex items-center">
-                                    <span class="text-sm text-gray-500 mr-2">IPC: ${coreData.ipc.toFixed(3)}</span>
-                                    <button class="toggle-details text-gray-400 hover:text-gray-600 transition-colors">
-                                        <i class="fa fa-chevron-down"></i>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="mt-3 grid grid-cols-2 gap-2 text-sm">
-                                <div class="bg-gray-50 p-2 rounded">
-                                    <span class="text-gray-500">总指令数:</span>
-                                    <span class="font-medium">${formatNumber(coreData.totalInstructions)}</span>
-                                </div>
-                                <div class="bg-gray-50 p-2 rounded">
-                                    <span class="text-gray-500">总周期数:</span>
-                                    <span class="font-medium">${formatNumber(coreData.totalCycles)}</span>
-                                </div>
-                            </div>
-                        </div>
-                        <div class="core-details p-5">
-                            <div class="mb-6">
-                                <h3 class="text-lg font-medium text-gray-800 mb-3">总体分布</h3>
-                                <div class="topdown-chart h-64 mb-4">
-                                    <canvas id="core${index}-overall-chart"></canvas>
-                                </div>
-                                <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm">
-                                    ${generateSummaryLabels(coreData)}
-                                </div>
-                            </div>
+        function analyzeAndRender(perfData) {
+            const events = parsePerfData(perfData);
+            // Normalize event keys and provide defaults
+            const eventGet = (key) => events[key] || events[key.replace('r00','r')] || 0;
+            const r = (hex) => eventGet('r' + hex.padStart(4, '0'));
 
-                            <h3 class="text-lg font-medium text-gray-800 mb-3">层次化分析</h3>
-                            <div class="h-96 overflow-auto">
-                                <div id="core${index}-treemap" class="h-full"></div>
-                            </div>
-                        </div>
-                    `;
-                    
-                    coresContainer.appendChild(coreCard);
-                    
-                    // 初始化图表
-                    setTimeout(() => {
-                        initOverallChart(index, coreData);
-                        createTreemapChart(`core${index}-treemap`, coreData);
-                    }, 100 * index); // 添加延迟，避免浏览器卡顿
-                });
-                
-                // 添加详情切换事件
-                document.querySelectorAll('.toggle-details').forEach(button => {
-                    button.addEventListener('click', function() {
-                        const details = this.closest('.core-card').querySelector('.core-details');
-                        const icon = this.querySelector('i');
-                        
-                        if (details.style.display === 'none') {
-                            details.style.display = 'block';
-                            icon.classList.remove('fa-chevron-right');
-                            icon.classList.add('fa-chevron-down');
-                        } else {
-                            details.style.display = 'none';
-                            icon.classList.remove('fa-chevron-down');
-                            icon.classList.add('fa-chevron-right');
-                        }
-                    });
-                });
+            const r0011 = r('0011'); // Total Cycles
+            if (!r0011) {
+                 alert("错误：周期计数(r0011/cpu-cycles)为零或缺失，无法进行分析。");
+                 return;
             }
+            const r0008 = r('0008'); // Instructions Retired
+
+            const results = {};
+            results.total_instructions = r0008;
+            results.total_cycles = r0011;
+            results.ipc = r0011 > 0 ? r0008 / r0011 : 0;
+
+            const Frontend_Bound = (r('2014') / (4 * r0011)) * 100;
+            const Frontend_Latency = (r('201d') / r0011) * 100;
             
-            // 生成摘要标签
-            function generateSummaryLabels(coreData) {
-                const categories = coreData.children;
-                let html = '';
-                
-                categories.forEach(category => {
-                    const categoryName = category.name.split(' ')[0];
-                    const colorClass = category.color.replace('#', '');
-                    const bgColorClass = `bg-[#${colorClass}/10]`;
-                    const borderColorClass = `border-l-4 border-[#${colorClass}]`;
-                    const textColorClass = `text-[#${colorClass}]`;
-                    
-                    html += `
-                        <div class="${bgColorClass} p-2 rounded ${borderColorClass}">
-                            <span class="${textColorClass} font-medium">${categoryName}:</span>
-                            <span class="text-gray-700">${category.value.toFixed(2)}%</span>
-                        </div>
-                    `;
-                });
-                
-                return html;
-            }
+            const iTLB_Miss = (((r('0030') - r('002e')) * 15 + r('002e') * 100) / r0011) * 100;
+            const iCache_Miss = (((r('0027') - r('0028')) * 15 + r('0028') * 100) / r0011) * 100;
             
-            // 初始化总体分布图表
-            function initOverallChart(coreIndex, coreData) {
-                const ctx = document.getElementById(`core${coreIndex}-overall-chart`).getContext('2d');
-                
-                // 提取主要类别数据
-                const labels = coreData.children.map(c => c.name.split(' ')[0]);
-                const data = coreData.children.map(c => c.value);
-                const colors = coreData.children.map(c => c.color);
-                
-                new Chart(ctx, {
-                    type: 'doughnut',
-                    data: {
-                        labels: labels,
-                        datasets: [{
-                            data: data,
-                            backgroundColor: colors,
-                            borderWidth: 0,
-                            hoverOffset: 10
-                        }]
-                    },
-                    options: {
-                        responsive: true,
-                        maintainAspectRatio: false,
-                        plugins: {
-                            legend: {
-                                position: 'right',
-                                labels: {
-                                    usePointStyle: true,
-                                    padding: 20,
-                                    font: {
-                                        size: 12
-                                    }
+            results.frontend_bound = {
+                value: Frontend_Bound,
+                details: {
+                    'Frontend Latency': {
+                        value: Frontend_Latency,
+                        details: {
+                            'iTLB Miss': {
+                                value: iTLB_Miss,
+                                details: {
+                                    'L1 iTLB Miss': (((r('0030') - r('002e')) * 15) / r0011) * 100,
+                                    'L2 iTLB Miss': ((r('002e') * 100) / r0011) * 100,
                                 }
                             },
-                            tooltip: {
-                                callbacks: {
-                                    label: function(context) {
-                                        const label = context.label || '';
-                                        const value = context.raw || 0;
-                                        return `${label}: ${value.toFixed(2)}%`;
-                                    }
+                            'iCache Miss': {
+                                value: iCache_Miss,
+                                details: {
+                                    'L1 iCache Miss': (((r('0027') - r('0028')) * 15) / r0011) * 100,
+                                    'L2 iCache Miss': ((r('0028') * 100) / r0011) * 100,
+                                }
+                            },
+                            'BP Misp Flush': ((r('0010') * 5) / r0011) * 100,
+                            'OoO Rob Flush': ((r('2013') * 5) / r0011) * 100,
+                            'Static Predictor Flush': ((r('1001') * 5) / r0011) * 100,
+                        }
+                    },
+                    'Frontend Bandwidth': { value: Frontend_Bound - Frontend_Latency }
+                }
+            };
+
+            const Bad_Speculation = Math.max(0, ((r('001b') - r0008) / (4 * r0011)) * 100);
+            const r0010_plus_r2013 = (r('0010') + r('2013'));
+            const Branch_Misp = r0010_plus_r2013 > 0 ? Bad_Speculation * (r('0010') / r0010_plus_r2013) : 0;
+            const Machine_Clears = Bad_Speculation - Branch_Misp;
+
+            results.bad_speculation = {
+                value: Bad_Speculation,
+                details: {
+                    'Branch Mispredicts': {
+                        value: Branch_Misp,
+                        details: {
+                            'Indirect Branch': r('0010') > 0 ? Branch_Misp * (r('1010') / r('0010')) : 0,
+                            'Push Branch': r('0010') > 0 ? Branch_Misp * ((r('1013') + r('1016')) / r('0010')) : 0,
+                            'Pop Branch': r('0010') > 0 ? Branch_Misp * (r('100d') / r('0010')) : 0,
+                            'Other Branch': r('0010') > 0 ? Branch_Misp * ((r('0010') - r('1010') - r('1013') - r('1016') - r('100d')) / r('0010')) : 0,
+                        }
+                    },
+                    'Machine Clears': {
+                        value: Machine_Clears,
+                        details: {
+                            'Nuke Flush': r('2013') > 0 ? Machine_Clears * (r('2012') / r('2013')) : 0,
+                            'Other Flush': r('2013') > 0 ? Machine_Clears * ((r('2013') - r('2012')) / r('2013')) : 0,
+                        }
+                    }
+                }
+            };
+
+            const Retiring = (r0008 / (4 * r0011)) * 100;
+            results.retiring = { value: Retiring };
+
+            const Backend_Bound = Math.max(0, 100 - Frontend_Bound - Bad_Speculation - Retiring);
+            const r7000_plus_r7001 = (r('7000') + r('7001'));
+            const Resource_Bound = r7000_plus_r7001 > 0 ? (r('7000') / r7000_plus_r7001) * Backend_Bound : 0;
+            const Core_Bound = r7000_plus_r7001 > 0 ? ((r('7001') - r('7004') - r('7005')) / r7000_plus_r7001) * Backend_Bound : 0;
+            const Memory_Bound = r7000_plus_r7001 > 0 ? ((r('7004') + r('7005')) / r7000_plus_r7001) * Backend_Bound : 0;
+            const Divider_Stall = (r('7002') / r0011) * 100;
+            const FSU_Stall = (r('7003') / r0011) * 100;
+            const Exe_Ports_Util = Core_Bound - Divider_Stall - FSU_Stall;
+
+            results.backend_bound = {
+                value: Backend_Bound,
+                details: {
+                    'Resource Bound': {
+                        value: Resource_Bound,
+                        details: {
+                            'Sync Stall': r7000_plus_r7001 > 0 ? (r('2010') / r7000_plus_r7001) * Backend_Bound : 0,
+                            'Rob Stall': r7000_plus_r7001 > 0 ? (r('2004') / r7000_plus_r7001) * Backend_Bound : 0,
+                            'Ptag Stall': r7000_plus_r7001 > 0 ? ((r('2006') + r('2007') + r('2008')) / r7000_plus_r7001) * Backend_Bound : 0,
+                            'SaveOpQ Stall': r7000_plus_r7001 > 0 ? (r('201e') / r7000_plus_r7001) * Backend_Bound : 0,
+                            'PC Buffer Stall': r7000_plus_r7001 > 0 ? (r('2005') / r7000_plus_r7001) * Backend_Bound : 0,
+                            'Other Stall': r7000_plus_r7001 > 0 ? ((r('7000') - r('2010') - r('2004') - r('2006') - r('201e') - r('2005')) / r7000_plus_r7001) * Backend_Bound : 0
+                        }
+                    },
+                    'Core Bound': {
+                        value: Core_Bound,
+                        details: {
+                            'Divider Stall': Divider_Stall,
+                            'FSU Stall': FSU_Stall,
+                            'Exe Ports Util': {
+                                value: Exe_Ports_Util,
+                                details: {
+                                    'ALU BRU IssueQ Full': (r('200b') / r0011) * 100,
+                                    'LS IssueQ Full': (r('200c') / r0011) * 100,
+                                    'FSU IssueQ Full': (r('200d') / r0011) * 100
                                 }
                             }
-                        },
-                        cutout: '70%'
-                    }
-                });
-            }
-            
-            // 创建层次化矩形图（Treemap）
-            function createTreemapChart(elementId, data, colorMode = 'category') {
-                // 清除现有内容
-                const container = document.getElementById(elementId);
-                container.innerHTML = '';
-
-                // 创建SVG元素
-                const width = container.offsetWidth;
-                const height = container.offsetHeight;
-
-                if (width === 0 || height === 0) {
-                    console.warn(`Treemap container ${elementId} has zero width or height.`);
-                    // Optionally, set a default size or return if dimensions are invalid
-                    // For now, we'll let D3 handle it, but it might result in no visible chart.
-                }
-
-
-                const svg = d3.select(`#${elementId}`)
-                    .append('svg')
-                    .attr('width', width)
-                    .attr('height', height)
-                    .append('g');
-
-                // 创建分区函数
-                const treemapLayout = d3.treemap() // Renamed to avoid conflict with treemap function name
-                    .size([width, height])
-                    .paddingInner(1) // Use paddingInner for spacing between cells
-                    .paddingOuter(0);
-
-
-                // 创建层次结构
-                // Important: d3.hierarchy processes the *current* state of `data`.
-                // If `data` has been modified by previous clicks (children moved to _children),
-                // this will reflect that state.
-                const root = d3.hierarchy(data)
-                    .sum(d => d.value > 0 ? d.value : 0.001) // Ensure value is positive for sum, use a tiny placeholder for zero/negative
-                    .sort((a, b) => b.value - a.value);
-
-                // Initial collapse: Collapse nodes deeper than depth 0 (direct children of root)
-                // This needs to be done *before* calling treemapLayout(root) if we want the layout to reflect the collapsed state.
-                // However, if `data` itself is mutated and this function is re-called,
-                // the state of `children` vs `_children` in `data` is what matters.
-
-                // If this is the first render for this specific `data` object (e.g. distinguished by a flag or by checking _children)
-                // then apply initial collapse.
-                // For simplicity, we'll assume that if `_children` exists anywhere, it's due to user interaction.
-                // A more robust way for initial collapse:
-                if (!root.descendants().some(d => d._children)) { // Only apply initial collapse if no node already has _children
-                    root.descendants().forEach(d => {
-                        if (d.depth > 0 && d.children) { // Collapse children of the first level nodes
-                            d._children = d.children;
-                            d.children = null;
                         }
-                    });
-                }
-
-                // 计算矩形树图布局 based on the current state of root (potentially with some nodes collapsed)
-                treemapLayout(root);
-
-                // 为不同配色模式定义颜色方案
-                let colorFn; // Renamed to avoid conflict
-                if (colorMode === 'category') {
-                    // 按类别配色
-                    colorFn = d => d.data.color || d3.scaleOrdinal(d3.quantize(d3.interpolateRainbow, root.children ? root.children.length + 1 : 1))(d.data.name);
-                } else {
-                    // 按强度配色 (max depth can be calculated dynamically for better scaling)
-                    const maxDepth = root.height;
-                    colorFn = d => d3.scaleSequential(d3.interpolateReds)(d.depth / (maxDepth + 1));
-                }
-
-                // Select all nodes that should be rendered (descendants that have an area)
-                const nodesToRender = root.descendants().filter(d => d.x1 > d.x0 && d.y1 > d.y0);
-
-                // 添加矩形组
-                const cell = svg.selectAll('g')
-                    .data(nodesToRender, d => d.data.name) // Use a key function for object constancy
-                    .join('g') // Use join for enter/update/exit
-                    .attr('transform', d => `translate(${d.x0},${d.y0})`);
-
-                // 添加矩形背景
-                cell.append('rect')
-                    .attr('width', d => d.x1 - d.x0)
-                    .attr('height', d => d.y1 - d.y0)
-                    .attr('fill', d => (d.children || d._children) ? colorFn(d) : (d.data.color || '#cccccc')) // Dim leaf nodes without pre-assigned color
-                    .attr('stroke', '#fff')
-                    .attr('stroke-width', 1.5)
-                    .style('cursor', d => (d.data.children && d.data.children.length > 0) || (d._children && d._children.length > 0) ? 'pointer' : 'default')
-                    .on('click', (event, d) => {
-                        // d here is the hierarchy node. d.data is the original data object.
-                        // We modify the hierarchy node (d) for D3's layout.
-                        // The original data (`data` parameter of createTreemapChart) is also mutated by d3.hierarchy if its nodes are exposed.
-                        if ((d.data.children && d.data.children.length > 0 && !d.children) || (d._children && d._children.length > 0)) { // If collapsed or has original children to expand
-                            d.children = d._children; // Restore children from _children (if any)
-                            d._children = null;       // Clear _children
-                            if (!d.children && d.data.children) d.children = d.data.children; // Ensure original children are used if _children was null
-
-                        } else if (d.children) { // If currently expanded
-                            d._children = d.children; // Store children in _children
-                            d.children = null;        // Collapse by setting d.children to null
-                        } else {
-                            return; // Leaf node or no children to toggle
-                        }
-                        // Re-render the treemap from the main data object (`data`) which is the root of this specific core's hierarchy.
-                        // D3's hierarchy function will process its current children/null state.
-                        createTreemapChart(elementId, data, colorMode);
-                    })
-                    .on('mouseover', function(event, d) {
-                        d3.select(this).attr('stroke-width', 3);
-                        d3.select('#treemap-tooltip').remove();
-                        const tooltip = d3.select('body').append('div')
-                            .attr('id', 'treemap-tooltip')
-                            .attr('class', 'absolute bg-gray-800 text-white text-sm p-2 rounded shadow-lg z-50 pointer-events-none')
-                            .html(`
-                                <div class="font-medium">${d.data.name}</div>
-                                <div>Value: ${d.value.toFixed(2)}%</div>
-                                ${d.parent ? `<div class="text-xs text-gray-300">Parent: ${d.parent.data.name.split(' (')[0]}</div>` : ''}
-                                ${(d.children || d._children) ? (d.children ? '<div class="text-xs text-yellow-300">Click to collapse</div>' : '<div class="text-xs text-yellow-300">Click to expand</div>') : ''}
-                            `);
-                        tooltip.style('left', (event.pageX + 10) + 'px').style('top', (event.pageY - 28) + 'px');
-                    })
-                    .on('mousemove', function(event) {
-                        d3.select('#treemap-tooltip').style('left', (event.pageX + 10) + 'px').style('top', (event.pageY - 28) + 'px');
-                    })
-                    .on('mouseout', function() {
-                        d3.select(this).attr('stroke-width', 1.5);
-                        d3.select('#treemap-tooltip').remove();
-                    });
-
-                // Add text labels, ensuring they are not added to tiny cells
-                cell.each(function(d) {
-                    const rectWidth = d.x1 - d.x0;
-                    const rectHeight = d.y1 - d.y0;
-                    if (rectWidth > 20 && rectHeight > 15) { // Only add text if cell is reasonably large
-                        const textElement = d3.select(this).append('text')
-                            .attr('x', 4)
-                            .attr('y', 16) // Position for name
-                            .attr('fill', 'white')
-                            .attr('font-size', Math.min(12, rectHeight / 3.5, rectWidth / 8)) // Adjust font size dynamically
-                            .attr('pointer-events', 'none');
-
-                        const name = d.data.name.split(' (')[0];
-                        const estimatedTextWidth = name.length * (textElement.attr('font-size') * 0.6); // Approx width
-
-                        textElement.text(estimatedTextWidth < rectWidth - 8 ? name : name.substring(0, Math.floor((rectWidth - 8) / (textElement.attr('font-size')*0.6))) + '...');
-
-                        // Add expand/collapse indicator for non-leaf nodes
-                        if ((d.children && d.children.length > 0) || (d._children && d._children.length > 0)) {
-                            d3.select(this).append('text')
-                                .attr('x', rectWidth - 10) // Position to the right
-                                .attr('y', 16) // Align with name text
-                                .attr('fill', 'white')
-                                .attr('font-size', Math.min(14, rectHeight / 3, rectWidth / 10))
-                                .attr('text-anchor', 'middle')
-                                .attr('pointer-events', 'none')
-                                .text(d.children ? '-' : '+');
+                    },
+                    'Memory Bound': {
+                        value: Memory_Bound,
+                        details: {
+                            'L1 Bound': r7000_plus_r7001 > 0 ? ((r('7004') - r('7006')) / r7000_plus_r7001) * Backend_Bound : 0,
+                            'L2 Bound': r7000_plus_r7001 > 0 ? ((r('7006') - r('7007')) / r7000_plus_r7001) * Backend_Bound : 0,
+                            'L3/DRAM Bound': r7000_plus_r7001 > 0 ? (r('7007') / r7000_plus_r7001) * Backend_Bound : 0,
+                            'Store Bound': r7000_plus_r7001 > 0 ? (r('7005') / r7000_plus_r7001) * Backend_Bound : 0
                         }
                     }
-                });
-            }
+                }
+            };
+
+            document.getElementById('total-instructions').textContent = results.total_instructions.toLocaleString();
+            document.getElementById('total-cycles').textContent = results.total_cycles.toLocaleString();
+            document.getElementById('ipc').textContent = results.ipc.toFixed(3);
+
+            const topLevelMetrics = {
+                frontend_bound: results.frontend_bound,
+                bad_speculation: results.bad_speculation,
+                retiring: results.retiring,
+                backend_bound: results.backend_bound,
+            };
             
-            // 生成优化建议
-            function generateOptimizationSuggestions(coresData) {
-                const suggestionsContainer = document.getElementById('optimization-suggestions');
-                suggestionsContainer.innerHTML = '';
-                
-                // 分析所有核的数据，找出主要瓶颈
-                const bottlenecks = {
-                    frontend: 0,
-                    speculation: 0,
-                    retiring: 0,
-                    backend: 0,
-                    memory: 0
-                };
-                
-                coresData.forEach(core => {
-                    core.children.forEach(category => {
-                        if (category.name.includes('Front-End')) {
-                            bottlenecks.frontend += category.value;
-                        } else if (category.name.includes('Bad Speculation')) {
-                            bottlenecks.speculation += category.value;
-                        } else if (category.name.includes('Retiring')) {
-                            bottlenecks.retiring += category.value;
-                        } else if (category.name.includes('Back-End')) {
-                            bottlenecks.backend += category.value;
-                            
-                            // 检查内存瓶颈
-                            const memoryBound = category.children.find(c => c.name.includes('Memory'));
-                            if (memoryBound) {
-                                bottlenecks.memory += memoryBound.value;
+            const chartData = Object.keys(topLevelMetrics).map(key => {
+                 const name = key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                 return transformDataForChart(topLevelMetrics[key], name);
+            });
+
+            renderCustomPartitionChart(chartData);
+        }
+
+        function renderCustomPartitionChart(data) {
+            const chartContainer = document.getElementById('partition-chart');
+            const placeholder = document.getElementById('placeholder');
+            if(placeholder) placeholder.style.display = 'none';
+            chartContainer.innerHTML = '';
+
+            const levelColors = [
+                ['#5470c6', '#fac858', '#ee6666', '#91cc75'],
+                ['#73c0de', '#3ba272', '#fc8452', '#9a60b4', '#ea7ccc'],
+                ['#2a9d8f', '#e9c46a', '#f4a261', '#e76f51'],
+                ['#8ecae6', '#219ebc', '#023047', '#ffb703', '#fb8500']
+            ];
+
+            const createLevel = (nodes, depth, parentValue) => {
+                if (!nodes || nodes.length === 0) return;
+
+                const levelContainer = document.createElement('div');
+                levelContainer.className = 'partition-level';
+                levelContainer.dataset.depth = depth;
+
+                nodes.forEach((node, index) => {
+                    const nodeEl = document.createElement('div');
+                    const percentage = (node.value / parentValue) * 100;
+                    nodeEl.style.width = `${percentage}%`;
+                    nodeEl.classList.add('partition-node');
+
+                    const colorPalette = levelColors[depth] || levelColors[levelColors.length - 1];
+                    nodeEl.style.backgroundColor = colorPalette[index % colorPalette.length];
+
+                    nodeEl.innerHTML = `<div>${node.name}</div><div class="text-sm opacity-80">${node.value.toFixed(2)}%</div>`;
+
+                    if (node.children && node.children.length > 0) {
+                        nodeEl.classList.add('has-children');
+                        nodeEl.addEventListener('click', (e) => {
+                            e.stopPropagation();
+
+                            let nextLevel = levelContainer.nextElementSibling;
+                            while(nextLevel && parseInt(nextLevel.dataset.depth) > depth) {
+                                const toRemove = nextLevel;
+                                nextLevel = nextLevel.nextElementSibling;
+                                toRemove.remove();
                             }
-                        }
-                    });
-                });
-                
-                // 归一化
-                Object.keys(bottlenecks).forEach(key => {
-                    bottlenecks[key] = bottlenecks[key] / coresData.length;
-                });
-                
-                // 找出最主要的三个瓶颈
-                const sortedBottlenecks = Object.entries(bottlenecks)
-                    .sort((a, b) => b[1] - a[1])
-                    .slice(0, 3);
-                
-                // 生成建议
-                const suggestionMap = {
-                    frontend: `
-                        <li class="flex items-start">
-                            <i class="fa fa-arrow-right text-xs text-primary mt-1.5 mr-2"></i>
-                            <span>前端瓶颈占比较高(平均${bottlenecks.frontend.toFixed(2)}%)，特别是指令缓存缺失，考虑优化代码布局和提高指令局部性</span>
-                        </li>
-                    `,
-                    speculation: `
-                        <li class="flex items-start">
-                            <i class="fa fa-arrow-right text-xs text-primary mt-1.5 mr-2"></i>
-                            <span>错误推测占比较高(平均${bottlenecks.speculation.toFixed(2)}%)，建议优化分支预测，减少分支误预测</span>
-                        </li>
-                    `,
-                    retiring: `
-                        <li class="flex items-start">
-                            <i class="fa fa-arrow-right text-xs text-primary mt-1.5 mr-2"></i>
-                            <span>执行效率有提升空间(平均${bottlenecks.retiring.toFixed(2)}%)，可以优化循环结构和算法复杂度</span>
-                        </li>
-                    `,
-                    backend: `
-                        <li class="flex items-start">
-                            <i class="fa fa-arrow-right text-xs text-primary mt-1.5 mr-2"></i>
-                            <span>当前系统主要瓶颈在后端(平均${bottlenecks.backend.toFixed(2)}%)，建议优化后端资源利用和核心调度</span>
-                        </li>
-                    `,
-                    memory: `
-                        <li class="flex items-start">
-                            <i class="fa fa-arrow-right text-xs text-primary mt-1.5 mr-2"></i>
-                            <span>内存访问瓶颈明显(平均${bottlenecks.memory.toFixed(2)}%)，建议优化内存访问模式，提高缓存命中率</span>
-                        </li>
-                    `
-                };
-                
-                sortedBottlenecks.forEach(([key, value]) => {
-                    if (suggestionMap[key]) {
-                        suggestionsContainer.innerHTML += suggestionMap[key];
+
+                            if (!nodeEl.classList.contains('active')) {
+                                nodeEl.parentElement.childNodes.forEach(child => child.classList.remove('active'));
+                                nodeEl.classList.add('active');
+                                const childrenContainer = createLevel(node.children, depth + 1, node.value);
+                                if(childrenContainer) levelContainer.after(childrenContainer);
+                            } else {
+                                nodeEl.classList.remove('active');
+                            }
+                        });
                     }
+                    levelContainer.appendChild(nodeEl);
                 });
-            }
-            
-            // 全部展开/折叠按钮
-            document.getElementById('expand-all').addEventListener('click', function() {
-                document.querySelectorAll('.core-details').forEach(details => {
-                    details.style.display = 'block';
-                });
-                document.querySelectorAll('.toggle-details i').forEach(icon => {
-                    icon.classList.remove('fa-chevron-right');
-                    icon.classList.add('fa-chevron-down');
-                });
-                
-                // 展开所有树形图节点
-                allCoresData.forEach((coreData, index) => {
-                    expandAllNodes(coreData);
-                    createTreemapChart(`core${index}-treemap`, coreData, document.getElementById('color-mode').value);
-                });
-            });
-
-            document.getElementById('collapse-all').addEventListener('click', function() {
-                document.querySelectorAll('.core-details').forEach(details => {
-                    details.style.display = 'none';
-                });
-                document.querySelectorAll('.toggle-details i').forEach(icon => {
-                    icon.classList.remove('fa-chevron-down');
-                    icon.classList.add('fa-chevron-right');
-                });
-                
-                // 折叠所有树形图节点到一级
-                allCoresData.forEach((coreData, index) => {
-                    collapseAllNodes(coreData);
-                    createTreemapChart(`core${index}-treemap`, coreData, document.getElementById('color-mode').value);
-                });
-            });
-
-            // 递归展开所有节点
-            function expandAllNodes(node) {
-                if (node.children) {
-                    node.children.forEach(child => {
-                        expandAllNodes(child);
-                    });
-                }
+                return levelContainer;
             }
 
-            // 递归折叠所有节点到一级
-            function collapseAllNodes(node) {
-                if (node.children) {
-                    // 保存子节点
-                    node._children = node.children;
-                    // 清空当前子节点
-                    node.children = null;
-                }
-            }
+            const topLevelContainer = createLevel(data, 0, 100);
+            chartContainer.appendChild(topLevelContainer);
+        }
 
-            // 配色模式切换
-            document.getElementById('color-mode').addEventListener('change', function() {
-                const mode = this.value;
-                console.log('切换配色模式:', mode);
-                
-                // 重新创建所有图表以应用新的配色方案
-                allCoresData.forEach((coreData, index) => {
-                    createTreemapChart(`core${index}-treemap`, coreData, mode);
-                });
-            });
-            
-            // 工具函数
-            function formatFileSize(bytes) {
-                if (bytes === 0) return '0 Bytes';
-                
-                const k = 1024;
-                const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-                const i = Math.floor(Math.log(bytes) / Math.log(k));
-                
-                return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-            }
-            
-            function formatNumber(num) {
-                return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+        document.getElementById('analyzeBtn').addEventListener('click', () => {
+            const fileInput = document.getElementById('fileInput');
+            const file = fileInput.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                         analyzeAndRender(e.target.result);
+                    } catch (error) {
+                        console.error("分析数据时出错:", error);
+                        alert("分析文件时发生错误。请检查控制台获取详细信息。");
+                    }
+                };
+                reader.readAsText(file);
+            } else {
+                alert('请先选择一个文件。');
             }
         });
-        
-        // Removed dynamic D3.js library introduction from here
     </script>
 </body>
 </html>
