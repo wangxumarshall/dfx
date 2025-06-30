@@ -69,7 +69,12 @@
                         file:bg-indigo-50 file:text-indigo-700
                         hover:file:bg-indigo-100
                     "/>
-                     <button id="analyzeBtn" class="px-6 py-2 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-75">分析</button>
+                    <div class="flex items-center space-x-2">
+                        <button id="analyzeBtn" class="px-6 py-2 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-75">分析</button>
+                        <select id="coreSelector" class="px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" style="display: none;">
+                            <!-- Options will be populated by JavaScript -->
+                        </select>
+                    </div>
                 </div>
             </div>
 
@@ -102,21 +107,84 @@
 
     <script>
         function parsePerfData(data) {
-            const events = {};
+            const allCoreData = {};
             const lines = data.trim().split('\n');
-            lines.forEach(line => {
+            let currentCoreKey = "core0"; // Default key for data before any core identifier
+            let coreData = {};
+            let coreCount = 0;
+            let processingCoreData = false;
+
+            const coreHeaderRegex = /-------------------core\s*(\d+)-------------------------/;
+            const eventDataStartRegex = /count\s+name\s+\|\s+comment\s+\|\s+coverage/;
+
+            for (const line of lines) {
+                const coreMatch = line.match(coreHeaderRegex);
+                if (coreMatch) {
+                    if (processingCoreData || Object.keys(coreData).length > 0) { // Save previous core's data if any
+                        allCoreData[currentCoreKey] = coreData;
+                    }
+                    currentCoreKey = `core${coreMatch[1]}`;
+                    coreData = {}; // Reset for the new core
+                    coreCount++;
+                    processingCoreData = false; // Wait for event data start line
+                    continue;
+                }
+
+                if (line.match(eventDataStartRegex)) {
+                    processingCoreData = true;
+                    continue;
+                }
+
+                if (!processingCoreData && !line.trim().startsWith("count") && line.includes("0x")) {
+                     // This handles the case where data might appear before the first core marker for "core0"
+                     // or if there's only single core data without markers
+                } else if (!processingCoreData) {
+                    continue; // Skip lines until we hit the data start marker for a core
+                }
+
+
                 const parts = line.trim().split(/\s+/);
-                if (parts.length >= 2) {
+                if (parts.length >= 2 && parts[1] && parts[1].startsWith('0x')) {
                     const value = parseFloat(parts[0].replace(/,/g, ''));
                     let key = parts[1];
-                    if (key.startsWith('r')) {
-                       const hexPart = key.substring(1);
-                       key = 'r' + hexPart.padStart(4, '0');
+                    // Standardize the key format if needed, e.g., from "0x0005" to "r0005"
+                    // For now, assume the format is consistent with how `r(hex)` expects it or adjust `r(hex)`
+                    // The existing code uses `r(hex)` which prepends 'r' and pads hex.
+                    // So, storing keys as "0x0005" and letting `r()` handle it is fine.
+                    // However, the original parsePerfData converted to 'rXXXX' format. Let's stick to that.
+                    if (key.startsWith('0x')) {
+                        key = 'r' + key.substring(2).padStart(4, '0');
+                    } else if (key.startsWith('r')) { // Already in rXXXX format
+                        const hexPart = key.substring(1);
+                        key = 'r' + hexPart.padStart(4, '0');
                     }
-                    events[key] = value;
+                    coreData[key] = value;
                 }
-            });
-            return events;
+            }
+
+            // Save the last processed core's data
+            if (Object.keys(coreData).length > 0) {
+                allCoreData[currentCoreKey] = coreData;
+            }
+
+            // If no core markers were found, assume single core data and put it under "core0"
+            if (coreCount === 0 && Object.keys(allCoreData).length > 0 && !allCoreData["core0"] ) {
+                // This case is tricky. If allCoreData has data from the loop but not under core0,
+                // it means the very first coreData (initialized as currentCoreKey = "core0") got data.
+                // This is correct.
+            } else if (coreCount === 0 && Object.keys(coreData).length > 0 && !allCoreData["core0"]) {
+                 allCoreData["core0"] = coreData; // Handles single core data without markers
+            }
+
+
+            // If after all processing, allCoreData is empty but coreData has entries
+            // (e.g. single core data without any core markers and not hitting the first if inside loop)
+            if (Object.keys(allCoreData).length === 0 && Object.keys(coreData).length > 0) {
+                 allCoreData["core0"] = coreData;
+            }
+
+
+            return allCoreData;
         }
 
         function transformDataForChart(node, name) {
@@ -124,30 +192,92 @@
             if (node.details) {
                 for (const key in node.details) {
                     const childNode = node.details[key];
-                    if (typeof childNode === 'object' && childNode.value !== undefined && childNode.value > 0) {
+                    // Ensure value is a number and greater than 0 before adding to chart
+                    const numericValue = parseFloat(childNode.value);
+                    if (typeof childNode === 'object' && childNode.value !== undefined && !isNaN(numericValue) && numericValue > 0) {
                         children.push(transformDataForChart(childNode, key));
-                    } else if (typeof childNode === 'number' && childNode > 0) {
+                    } else if (typeof childNode === 'number' && !isNaN(childNode) && childNode > 0) {
                          children.push({ name: key, value: childNode });
                     }
                 }
             }
-            const result = { name, value: node.value };
+            const result = { name, value: parseFloat(node.value) || 0 };
             if (children.length > 0) {
                 result.children = children;
             }
             return result;
         }
 
-        function analyzeAndRender(perfData) {
-            const events = parsePerfData(perfData);
+        // Global variables
+        let allParsedData = {};
+        let currentSelectedCoreId = "core0";
+        let rawPerfFileText = ""; // To store the raw text content of the performance file
+
+        function populateCoreSelector(coreKeys, selectedCoreId) {
+            const selector = document.getElementById('coreSelector');
+            selector.innerHTML = ''; // Clear existing options
+            coreKeys.sort(); // Sort core keys for consistent order
+
+            coreKeys.forEach(coreKey => {
+                const option = document.createElement('option');
+                option.value = coreKey;
+                option.textContent = coreKey.replace('core', 'Core ');
+                if (coreKey === selectedCoreId) {
+                    option.selected = true;
+                }
+                selector.appendChild(option);
+            });
+
+            if (coreKeys.length > 1) {
+                selector.style.display = 'inline-block'; // Show selector if multiple cores
+            } else {
+                selector.style.display = 'none'; // Hide if single core or no cores
+            }
+        }
+
+
+        function analyzeAndRender(perfTextData, coreIdToAnalyze, isInitialParse = false) {
+            if (isInitialParse) {
+                allParsedData = parsePerfData(perfTextData);
+                rawPerfFileText = perfTextData; // Store raw text
+            }
+
+            if (Object.keys(allParsedData).length === 0) {
+                alert("错误：未能解析任何性能数据。请检查文件格式。");
+                document.getElementById('coreSelector').style.display = 'none'; // Hide selector
+                document.getElementById('placeholder').textContent = '未能解析数据，请检查文件格式和内容。';
+                document.getElementById('placeholder').style.display = 'block';
+                return;
+            }
+
+            const coreKeys = Object.keys(allParsedData);
+            if (!coreIdToAnalyze || !allParsedData[coreIdToAnalyze]) {
+                coreIdToAnalyze = coreKeys[0]; // Default to the first available core
+            }
+            currentSelectedCoreId = coreIdToAnalyze;
+
+            const events = allParsedData[coreIdToAnalyze];
+            if (!events || Object.keys(events).length === 0) {
+                alert(`错误：在核心 ${coreIdToAnalyze} 中没有找到事件数据。`);
+                document.getElementById('placeholder').textContent = `核心 ${coreIdToAnalyze} 无有效数据。`;
+                document.getElementById('placeholder').style.display = 'block';
+                return;
+            }
+
             // Normalize event keys and provide defaults
             const eventGet = (key) => events[key] || events[key.replace('r00','r')] || 0;
             const r = (hex) => eventGet('r' + hex.padStart(4, '0'));
 
+            // Ensure essential events are present
             const r0011 = r('0011'); // Total Cycles
-            if (!r0011) {
-                 alert("错误：周期计数(r0011/cpu-cycles)为零或缺失，无法进行分析。");
+            if (!r0011 && r0011 !==0) { // Allow 0 cycles, but not undefined/NaN
+                 alert(`错误：核心 ${coreIdToAnalyze} 的周期计数(r0011/cpu-cycles)为零或缺失，无法进行分析。`);
+                 document.getElementById('placeholder').textContent = `核心 ${coreIdToAnalyze} 周期计数(r0011/cpu-cycles)缺失。`;
+                 document.getElementById('placeholder').style.display = 'block';
                  return;
+            }
+            if (r0011 === 0) {
+                console.warn(`核心 ${coreIdToAnalyze} 的周期计数(r0011/cpu-cycles)为零. 部分百分比指标可能为NaN或Infinity.`);
             }
             const r0008 = r('0008'); // Instructions Retired
 
@@ -226,6 +356,16 @@
             const Resource_Bound = r7000_plus_r7001 > 0 ? (r('7000') / r7000_plus_r7001) * Backend_Bound : 0;
             const Core_Bound = r7000_plus_r7001 > 0 ? ((r('7001') - r('7004') - r('7005')) / r7000_plus_r7001) * Backend_Bound : 0;
             const Memory_Bound = r7000_plus_r7001 > 0 ? ((r('7004') + r('7005')) / r7000_plus_r7001) * Backend_Bound : 0;
+
+            // New derived events for DTLB
+            const event_0x0005 = r('0005');
+            const event_0x0025 = r('0025');
+            const event_0x002d = r('002d');
+            const event_0x002f = r('002f');
+
+            const L1_DTLB_Miss_Rate = event_0x0025 > 0 ? (event_0x0005 / event_0x0025) * 100 : 0; // As percentage
+            const L2_DTLB_Miss_Rate = event_0x002f > 0 ? (event_0x002d / event_0x002f) * 100 : 0; // As percentage
+
             const Divider_Stall = (r('7002') / r0011) * 100;
             const FSU_Stall = (r('7003') / r0011) * 100;
             const Exe_Ports_Util = Core_Bound - Divider_Stall - FSU_Stall;
@@ -262,14 +402,39 @@
                     'Memory Bound': {
                         value: Memory_Bound,
                         details: {
-                            'L1 Bound': r7000_plus_r7001 > 0 ? ((r('7004') - r('7006')) / r7000_plus_r7001) * Backend_Bound : 0,
-                            'L2 Bound': r7000_plus_r7001 > 0 ? ((r('7006') - r('7007')) / r7000_plus_r7001) * Backend_Bound : 0,
+                            'L1 Bound': {
+                                value: r7000_plus_r7001 > 0 ? ((r('7004') - r('7006')) / r7000_plus_r7001) * Backend_Bound : 0,
+                                details: {
+                                    'L1-DTLB Miss Rate': L1_DTLB_Miss_Rate
+                                }
+                            },
+                            'L2 Bound': {
+                                value: r7000_plus_r7001 > 0 ? ((r('7006') - r('7007')) / r7000_plus_r7001) * Backend_Bound : 0,
+                                details: {
+                                    'L2-DTLB Miss Rate': L2_DTLB_Miss_Rate
+                                }
+                            },
                             'L3/DRAM Bound': r7000_plus_r7001 > 0 ? (r('7007') / r7000_plus_r7001) * Backend_Bound : 0,
                             'Store Bound': r7000_plus_r7001 > 0 ? (r('7005') / r7000_plus_r7001) * Backend_Bound : 0
                         }
                     }
                 }
             };
+
+            // Filter out zero-value entries from details before rendering, unless they are specifically meant to be shown as zero.
+            // This needs a recursive clean-up or careful construction.
+            // For now, transformDataForChart handles filtering of values > 0 for children.
+            // The DTLB rates are percentages; if 0%, they might be filtered by transformDataForChart if not handled.
+            // Let's ensure transformDataForChart can handle objects with 'value' and 'details'
+            // and that 'L1-DTLB Miss Rate' and 'L2-DTLB Miss Rate' are treated as final metrics.
+            // The current transformDataForChart will treat L1_DTLB_Miss_Rate as a direct child if it's a number > 0.
+            // If L1_DTLB_Miss_Rate is 0, it won't be shown. This might be acceptable.
+            // If it needs to be shown even if 0, transformDataForChart needs adjustment or the structure should be {value: L1_DTLB_Miss_Rate}.
+            // Let's make them objects with a 'value' property to be consistent.
+
+            results.backend_bound.details['Memory Bound'].details['L1 Bound'].details['L1-DTLB Miss Rate'] = { value: L1_DTLB_Miss_Rate };
+            results.backend_bound.details['Memory Bound'].details['L2 Bound'].details['L2-DTLB Miss Rate'] = { value: L2_DTLB_Miss_Rate };
+
 
             document.getElementById('total-instructions').textContent = results.total_instructions.toLocaleString();
             document.getElementById('total-cycles').textContent = results.total_cycles.toLocaleString();
@@ -359,15 +524,40 @@
                 const reader = new FileReader();
                 reader.onload = (e) => {
                     try {
-                         analyzeAndRender(e.target.result);
+                        // Reset global state for new file analysis
+                        allParsedData = {};
+                        rawPerfFileText = "";
+                        currentSelectedCoreId = "core0"; // Reset to default
+
+                        analyzeAndRender(e.target.result, currentSelectedCoreId, true); // true for initial parse
+
+                        const coreKeys = Object.keys(allParsedData);
+                        if (coreKeys.length > 0) {
+                            populateCoreSelector(coreKeys, currentSelectedCoreId);
+                        } else {
+                            document.getElementById('coreSelector').style.display = 'none';
+                        }
                     } catch (error) {
                         console.error("分析数据时出错:", error);
                         alert("分析文件时发生错误。请检查控制台获取详细信息。");
+                        document.getElementById('coreSelector').style.display = 'none';
                     }
                 };
                 reader.readAsText(file);
             } else {
                 alert('请先选择一个文件。');
+            }
+        });
+
+        document.getElementById('coreSelector').addEventListener('change', function() {
+            const selectedCore = this.value;
+            if (rawPerfFileText && allParsedData[selectedCore]) {
+                 // Clear existing chart before rendering new core data
+                const chartContainer = document.getElementById('partition-chart');
+                chartContainer.innerHTML = '<div id="placeholder" class="text-center text-gray-500 flex items-center justify-center h-full">加载核心数据中...</div>';
+
+                // Call analyzeAndRender, false for isInitialParse as data is already parsed
+                analyzeAndRender(rawPerfFileText, selectedCore, false);
             }
         });
     </script>
