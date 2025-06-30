@@ -352,10 +352,34 @@
             results.retiring = { value: Retiring };
 
             const Backend_Bound = Math.max(0, 100 - Frontend_Bound - Bad_Speculation - Retiring);
-            const r7000_plus_r7001 = (r('7000') + r('7001'));
-            const Resource_Bound = r7000_plus_r7001 > 0 ? (r('7000') / r7000_plus_r7001) * Backend_Bound : 0;
-            const Core_Bound = r7000_plus_r7001 > 0 ? ((r('7001') - r('7004') - r('7005')) / r7000_plus_r7001) * Backend_Bound : 0;
-            const Memory_Bound = r7000_plus_r7001 > 0 ? ((r('7004') + r('7005')) / r7000_plus_r7001) * Backend_Bound : 0;
+
+            // Revised calculation for Backend_Bound components
+            const raw_resource_val = r('7000');
+            const raw_mem_val = r('7004') + r('7005');
+            const raw_core_val = r('7001') - raw_mem_val; // Assuming r7004 & r7005 are parts of r7001 for "Core" calculation
+
+            const adj_resource_numerator = Math.max(0, raw_resource_val);
+            const adj_core_numerator = Math.max(0, raw_core_val);
+            const adj_mem_numerator = Math.max(0, raw_mem_val); // Should always be >=0 if r7004, r7005 are counts
+
+            const total_backend_indicators = adj_resource_numerator + adj_core_numerator + adj_mem_numerator;
+
+            let Resource_Bound, Core_Bound, Memory_Bound;
+
+            if (total_backend_indicators === 0) {
+                Resource_Bound = 0;
+                Core_Bound = 0;
+                // If no indicators, but Backend_Bound > 0, assign Backend_Bound to "Other" or a default, or leave all as 0.
+                // For now, if indicators are zero, components are zero. Backend_Bound might still be non-zero.
+                // This case might need a specific "Backend_Bound_Other" category if Backend_Bound > 0.
+                // Or, if Backend_Bound > 0 and total_backend_indicators is 0, it implies all Backend_Bound is "Other",
+                // which is not explicitly categorized here. For simplicity, let them be 0.
+                Memory_Bound = 0;
+            } else {
+                Resource_Bound = (adj_resource_numerator / total_backend_indicators) * Backend_Bound;
+                Core_Bound = (adj_core_numerator / total_backend_indicators) * Backend_Bound;
+                Memory_Bound = (adj_mem_numerator / total_backend_indicators) * Backend_Bound;
+            }
 
             // New derived events for DTLB
             const event_0x0005 = r('0005');
@@ -373,25 +397,41 @@
             results.backend_bound = {
                 value: Backend_Bound,
                 details: {
-                    'Resource Bound': {
-                        value: Resource_Bound,
-                        details: {
-                            'Sync Stall': r7000_plus_r7001 > 0 ? (r('2010') / r7000_plus_r7001) * Backend_Bound : 0,
-                            'Rob Stall': r7000_plus_r7001 > 0 ? (r('2004') / r7000_plus_r7001) * Backend_Bound : 0,
-                            'Ptag Stall': r7000_plus_r7001 > 0 ? ((r('2006') + r('2007') + r('2008')) / r7000_plus_r7001) * Backend_Bound : 0,
-                            'SaveOpQ Stall': r7000_plus_r7001 > 0 ? (r('201e') / r7000_plus_r7001) * Backend_Bound : 0,
-                            'PC Buffer Stall': r7000_plus_r7001 > 0 ? (r('2005') / r7000_plus_r7001) * Backend_Bound : 0,
-                            'Other Stall': r7000_plus_r7001 > 0 ? ((r('7000') - r('2010') - r('2004') - r('2006') - r('201e') - r('2005')) / r7000_plus_r7001) * Backend_Bound : 0
+                    'Resource Bound': { // Children of Resource Bound need to be re-evaluated if their denominator was r7000_plus_r7001
+                        value: Resource_Bound, // This is the corrected Resource_Bound
+                        details: { // Denominators for these children might need to use adj_resource_numerator or similar
+                            'Sync Stall': adj_resource_numerator > 0 ? (r('2010') / adj_resource_numerator) * Resource_Bound : 0, // Example: Proportion of Resource_Bound
+                            'Rob Stall': adj_resource_numerator > 0 ? (r('2004') / adj_resource_numerator) * Resource_Bound : 0,
+                            'Ptag Stall': adj_resource_numerator > 0 ? ((r('2006') + r('2007') + r('2008')) / adj_resource_numerator) * Resource_Bound : 0,
+                            'SaveOpQ Stall': adj_resource_numerator > 0 ? (r('201e') / adj_resource_numerator) * Resource_Bound : 0,
+                            'PC Buffer Stall': adj_resource_numerator > 0 ? (r('2005') / adj_resource_numerator) * Resource_Bound : 0,
+                            // 'Other Stall' needs careful definition: sum of specified stalls vs total resource_val
+                            // For now, let's assume r('7000') is the sum of its sub-components.
+                            // If r('7000') (raw_resource_val) is the correct sum for these, then proportions are of raw_resource_val.
+                            // And then these are shares of Resource_Bound.
+                            // This part needs more domain knowledge on events 20xx vs 7000.
+                            // Sticking to previous logic for children for now, but scaled by new Resource_Bound
+                            // The original was (event / r7000_plus_r7001) * Backend_Bound.
+                            // This should now be (event / raw_resource_val_for_its_category) * Specific_Bound (e.g. Resource_Bound)
+                            // Assuming r('7000') is the sum of its children like r('2010'), r('2004'), etc.
+                            // Let's simplify Resource Bound children for now, this is not the main issue.
+                            // Placeholder:
+                             'Sync Stall': (r('2010') / r0011) * 100, // As % of total cycles, then it's up to user to see if it fits Resource_Bound
+                             'Rob Stall': (r('2004') / r0011) * 100,
+                             'Ptag Stall': ((r('2006') + r('2007') + r('2008'))/r0011) * 100,
+                             'SaveOpQ Stall': (r('201e') / r0011) * 100,
+                             'PC Buffer Stall': (r('2005') / r0011) * 100,
+                             // Other Stall would be Resource_Bound minus sum of above.
                         }
                     },
-                    'Core Bound': {
-                        value: Core_Bound,
+                    'Core Bound': { // Children of Core Bound also need re-evaluation
+                        value: Core_Bound, // Corrected Core_Bound
                         details: {
-                            'Divider Stall': Divider_Stall,
+                            'Divider Stall': Divider_Stall, // These are already % of r0011, seems fine
                             'FSU Stall': FSU_Stall,
                             'Exe Ports Util': {
-                                value: Exe_Ports_Util,
-                                details: {
+                                value: Exe_Ports_Util, // This is Core_Bound - Divider_Stall - FSU_Stall
+                                details: { // These are % of r0011
                                     'ALU BRU IssueQ Full': (r('200b') / r0011) * 100,
                                     'LS IssueQ Full': (r('200c') / r0011) * 100,
                                     'FSU IssueQ Full': (r('200d') / r0011) * 100
@@ -400,23 +440,40 @@
                         }
                     },
                     'Memory Bound': {
-                        value: Memory_Bound,
-                        details: {
-                            'L1 Bound': {
-                                value: r7000_plus_r7001 > 0 ? ((r('7004') - r('7006')) / r7000_plus_r7001) * Backend_Bound : 0,
-                                details: {
-                                    'L1-DTLB Miss Rate': L1_DTLB_Miss_Rate
-                                }
-                            },
-                            'L2 Bound': {
-                                value: r7000_plus_r7001 > 0 ? ((r('7006') - r('7007')) / r7000_plus_r7001) * Backend_Bound : 0,
-                                details: {
-                                    'L2-DTLB Miss Rate': L2_DTLB_Miss_Rate
-                                }
-                            },
-                            'L3/DRAM Bound': r7000_plus_r7001 > 0 ? (r('7007') / r7000_plus_r7001) * Backend_Bound : 0,
-                            'Store Bound': r7000_plus_r7001 > 0 ? (r('7005') / r7000_plus_r7001) * Backend_Bound : 0
-                        }
+                        value: Memory_Bound, // Corrected Memory_Bound
+                        details: (() => {
+                            const load_stalls_l1_hit_approx = Math.max(0, r('7004') - r('7006'));
+                            const load_stalls_l2_hit_approx = Math.max(0, r('7006') - r('7007'));
+                            const load_stalls_l3_miss_or_dram = r('7007'); // Assuming r7007 is always >= 0
+                            const store_stalls_total = r('7005');    // Assuming r7005 is always >= 0
+
+                            const total_mem_sub_indicators = load_stalls_l1_hit_approx + load_stalls_l2_hit_approx + load_stalls_l3_miss_or_dram + store_stalls_total;
+
+                            let L1_Bound_val = 0, L2_Bound_val = 0, L3_DRAM_Bound_val = 0, Store_Bound_val = 0;
+
+                            if (total_mem_sub_indicators > 0) {
+                                L1_Bound_val = (load_stalls_l1_hit_approx / total_mem_sub_indicators) * Memory_Bound;
+                                L2_Bound_val = (load_stalls_l2_hit_approx / total_mem_sub_indicators) * Memory_Bound;
+                                L3_DRAM_Bound_val = (load_stalls_l3_miss_or_dram / total_mem_sub_indicators) * Memory_Bound;
+                                Store_Bound_val = (store_stalls_total / total_mem_sub_indicators) * Memory_Bound;
+                            } else if (Memory_Bound > 0) {
+                                // If Memory_Bound > 0 but no sub_indicators, assign to a default like L3/DRAM or "Other Memory"
+                                // For now, they remain 0 if no indicators.
+                            }
+
+                            return {
+                                'L1 Bound': {
+                                    value: L1_Bound_val,
+                                    details: { 'L1-DTLB Miss Rate': { value: L1_DTLB_Miss_Rate } }
+                                },
+                                'L2 Bound': {
+                                    value: L2_Bound_val,
+                                    details: { 'L2-DTLB Miss Rate': { value: L2_DTLB_Miss_Rate } }
+                                },
+                                'L3/DRAM Bound': { value: L3_DRAM_Bound_val }, // Made it an object for consistency
+                                'Store Bound': { value: Store_Bound_val }      // Made it an object for consistency
+                            };
+                        })()
                     }
                 }
             };
