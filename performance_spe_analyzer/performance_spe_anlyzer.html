@@ -152,13 +152,22 @@
                     // The existing code uses `r(hex)` which prepends 'r' and pads hex.
                     // So, storing keys as "0x0005" and letting `r()` handle it is fine.
                     // However, the original parsePerfData converted to 'rXXXX' format. Let's stick to that.
-                    if (key.startsWith('0x')) {
-                        key = 'r' + key.substring(2).padStart(4, '0');
-                    } else if (key.startsWith('r')) { // Already in rXXXX format
-                        const hexPart = key.substring(1);
-                        key = 'r' + hexPart.padStart(4, '0');
+                    let originalEventName = parts[1]; // e.g., 0x002F, r00FF, R00gg
+                    let hexDigits;
+
+                    if (originalEventName.toLowerCase().startsWith('0x')) {
+                        hexDigits = originalEventName.substring(2);
+                    } else if (originalEventName.toLowerCase().startsWith('r')) {
+                        hexDigits = originalEventName.substring(1);
+                    } else {
+                        // Not a recognized hex event format, skip or log error
+                        // console.warn("Unrecognized event format:", originalEventName);
+                        continue; // Skip this line
                     }
-                    coreData[key] = value;
+
+                    // Normalize: prepend 'r', lowercase hex, pad to 4 chars
+                    const normalizedKey = 'r' + hexDigits.toLowerCase().padStart(4, '0');
+                    coreData[normalizedKey] = value;
                 }
             }
 
