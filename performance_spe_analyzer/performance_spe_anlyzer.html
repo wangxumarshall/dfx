@@ -70,7 +70,6 @@
                         hover:file:bg-indigo-100
                     "/>
                     <div class="flex items-center space-x-2">
-                        <button id="analyzeBtn" class="px-6 py-2 bg-indigo-600 text-white font-semibold rounded-lg shadow-md hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-75">分析</button>
                         <select id="coreSelector" class="px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" style="display: none;">
                             <!-- Options will be populated by JavaScript -->
                         </select>
@@ -225,7 +224,21 @@
         function populateCoreSelector(coreKeys, selectedCoreId) {
             const selector = document.getElementById('coreSelector');
             selector.innerHTML = ''; // Clear existing options
-            coreKeys.sort(); // Sort core keys for consistent order
+
+            // Sort core keys numerically, e.g., core0, core1, core2, ..., core9, core10
+            coreKeys.sort((a, b) => {
+                const numA = parseInt(a.replace('core', ''), 10);
+                const numB = parseInt(b.replace('core', ''), 10);
+                return numA - numB;
+            });
+
+            // If the initially selectedCoreId (e.g. "core0" default) is not in the sorted list,
+            // or if it was just a placeholder, update it to the first valid core from the sorted list.
+            if (!coreKeys.includes(selectedCoreId) && coreKeys.length > 0) {
+                selectedCoreId = coreKeys[0];
+                currentSelectedCoreId = selectedCoreId; // Update global tracker if necessary
+            }
+
 
             coreKeys.forEach(coreKey => {
                 const option = document.createElement('option');
@@ -583,9 +596,8 @@
             chartContainer.appendChild(topLevelContainer);
         }
 
-        document.getElementById('analyzeBtn').addEventListener('click', () => {
-            const fileInput = document.getElementById('fileInput');
-            const file = fileInput.files[0];
+        document.getElementById('fileInput').addEventListener('change', function(event) {
+            const file = event.target.files[0];
             if (file) {
                 const reader = new FileReader();
                 reader.onload = (e) => {
@@ -595,10 +607,21 @@
                         rawPerfFileText = "";
                         currentSelectedCoreId = "core0"; // Reset to default
 
+                        // Clear existing chart before rendering new file data
+                        const chartContainer = document.getElementById('partition-chart');
+                        chartContainer.innerHTML = '<div id="placeholder" class="text-center text-gray-500 flex items-center justify-center h-full">加载文件中...</div>';
+                        document.getElementById('total-instructions').textContent = '-';
+                        document.getElementById('total-cycles').textContent = '-';
+                        document.getElementById('ipc').textContent = '-';
+
+
                         analyzeAndRender(e.target.result, currentSelectedCoreId, true); // true for initial parse
 
                         const coreKeys = Object.keys(allParsedData);
                         if (coreKeys.length > 0) {
+                            // populateCoreSelector will determine the actual currentSelectedCoreId if the default "core0" isn't available.
+                            // So, we pass what analyzeAndRender used, or let populateCoreSelector pick the first from sorted list.
+                            // currentSelectedCoreId is already updated by analyzeAndRender if core0 wasn't found.
                             populateCoreSelector(coreKeys, currentSelectedCoreId);
                         } else {
                             document.getElementById('coreSelector').style.display = 'none';
@@ -607,11 +630,14 @@
                         console.error("分析数据时出错:", error);
                         alert("分析文件时发生错误。请检查控制台获取详细信息。");
                         document.getElementById('coreSelector').style.display = 'none';
+                        const chartContainer = document.getElementById('partition-chart');
+                        chartContainer.innerHTML = '<div id="placeholder" class="text-center text-red-500 flex items-center justify-center h-full">文件分析失败，请检查文件格式或控制台错误。</div>';
                     }
                 };
                 reader.readAsText(file);
             } else {
-                alert('请先选择一个文件。');
+                // No file selected, or selection cleared. Optionally reset view.
+                // For now, do nothing if no file is chosen after a previous selection.
             }
         });
 
