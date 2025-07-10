@@ -1,2 +1,0 @@
-# Dependencies for nl2bash
-# (Initially empty, will be populated as needed)
