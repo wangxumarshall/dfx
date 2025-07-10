@@ -1,0 +1,192 @@
+{% extends "layout.html" %}
+
+{% block title %}上传专利文件或输入URL{% endblock %}
+
+{% block head_extra %}
+<style>
+    .or-separator {
+        display: flex;
+        align-items: center;
+        text-align: center;
+        color: #6c757d;
+        margin: 20px 0;
+    }
+    .or-separator::before,
+    .or-separator::after {
+        content: '';
+        flex: 1;
+        border-bottom: 1px solid #ced4da;
+    }
+    .or-separator:not(:empty)::before {
+        margin-right: .25em;
+    }
+    .or-separator:not(:empty)::after {
+        margin-left: .25em;
+    }
+    .upload-section {
+        padding: 20px;
+        border: 1px solid #ddd;
+        border-radius: 5px;
+        background-color: #f9f9f9;
+        margin-bottom: 20px;
+    }
+    .nav-tabs .nav-link.active {
+        background-color: #f8f9fa;
+        border-bottom-color: #f8f9fa;
+    }
+    .tab-content {
+        border: 1px solid #dee2e6;
+        border-top: none;
+        padding: 20px;
+        border-radius: 0 0 .25rem .25rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-10">
+        <h2 class="text-center mb-4">专利侵权线索分析</h2>
+        <p class="text-center text-muted mb-4">请上传您的专利文件（如PDF、DOCX、MD格式），或提供专利文本的网页链接。同时，您可以上传一个包含多个潜在侵权线索文件的目录（支持ZIP压缩包）。</p>
+
+        <form id="uploadForm" action="{{ url_for('upload_and_analyze') }}" method="post" enctype="multipart/form-data">
+
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5>1. 上传核心专利文件</h5>
+                </div>
+                <div class="card-body">
+                    <ul class="nav nav-tabs" id="patentSourceTab" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <a class="nav-link active" id="upload-patent-tab" data-toggle="tab" href="#upload-patent" role="tab" aria-controls="upload-patent" aria-selected="true">上传文件</a>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <a class="nav-link" id="url-patent-tab" data-toggle="tab" href="#url-patent" role="tab" aria-controls="url-patent" aria-selected="false">输入URL</a>
+                        </li>
+                    </ul>
+                    <div class="tab-content" id="patentSourceTabContent">
+                        <div class="tab-pane fade show active" id="upload-patent" role="tabpanel" aria-labelledby="upload-patent-tab">
+                            <div class="form-group mt-3">
+                                <label for="patent_file">选择专利文件 (PDF, DOCX, MD, TXT)</label>
+                                <div class="custom-file">
+                                    <input type="file" class="custom-file-input" id="patent_file" name="patent_file" accept=".pdf,.doc,.docx,.md,.txt">
+                                    <label class="custom-file-label" for="patent_file" data-browse="浏览">选择文件...</label>
+                                </div>
+                                <small class="form-text text-muted">最大文件大小: 16MB。</small>
+                            </div>
+                        </div>
+                        <div class="tab-pane fade" id="url-patent" role="tabpanel" aria-labelledby="url-patent-tab">
+                            <div class="form-group mt-3">
+                                <label for="patent_url">专利网页链接</label>
+                                <input type="url" class="form-control" id="patent_url" name="patent_url" placeholder="例如：https://patents.google.com/patent/CN100334168C/zh">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5>2. 上传侵权线索文件/目录</h5>
+                </div>
+                <div class="card-body">
+                    <div class="form-group">
+                        <label for="evidence_files">选择侵权线索文件 (可多选) 或包含线索文件的ZIP压缩包</label>
+                        <div class="custom-file">
+                            <input type="file" class="custom-file-input" id="evidence_files" name="evidence_files[]" multiple accept=".pdf,.doc,.docx,.md,.txt,.zip">
+                            <label class="custom-file-label" for="evidence_files" data-browse="浏览">选择文件/ZIP包...</label>
+                        </div>
+                        <small class="form-text text-muted">您可以选择多个单独的线索文件，或者一个包含所有线索文件的ZIP压缩包。支持的文件类型：PDF, DOCX, MD, TXT。</small>
+                    </div>
+                </div>
+            </div>
+
+            <div class="text-center">
+                <button type="submit" class="btn btn-primary btn-lg">
+                    <span class="spinner-border spinner-border-sm d-none" role="status" aria-hidden="true"></span>
+                    提交分析
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts_extra %}
+<script>
+    document.addEventListener('DOMContentLoaded', function () {
+        // Display the selected file name in the custom file input
+        document.querySelectorAll('.custom-file-input').forEach(function(input) {
+            input.addEventListener('change', function (e) {
+                let fileNames = [];
+                for (let i = 0; i < e.target.files.length; i++) {
+                    fileNames.push(e.target.files[i].name);
+                }
+                let nextSibling = e.target.nextElementSibling;
+                if (nextSibling && nextSibling.classList.contains('custom-file-label')) {
+                    nextSibling.innerText = fileNames.join(', ') || '选择文件...';
+                }
+            });
+        });
+
+        const form = document.getElementById('uploadForm');
+        const submitButton = form.querySelector('button[type="submit"]');
+        const spinner = submitButton.querySelector('.spinner-border');
+
+        form.addEventListener('submit', function(e) {
+            const patentFile = document.getElementById('patent_file').files.length;
+            const patentUrl = document.getElementById('patent_url').value.trim();
+            const evidenceFiles = document.getElementById('evidence_files').files.length;
+
+            if (!patentFile && !patentUrl) {
+                e.preventDefault();
+                alert('请至少上传一个专利文件或提供一个专利URL。');
+                return;
+            }
+
+            if (patentFile && patentUrl) {
+                e.preventDefault();
+                alert('请只选择上传专利文件或输入专利URL中的一种方式，不要同时提供。');
+                return;
+            }
+
+            // if (evidenceFiles === 0) {
+            //     e.preventDefault();
+            //     alert('请至少上传一个侵权线索文件或包含线索文件的ZIP包。');
+            //     return;
+            // }
+
+            submitButton.disabled = true;
+            spinner.classList.remove('d-none');
+            submitButton.childNodes[submitButton.childNodes.length-1].nodeValue = " 处理中...";
+        });
+
+        // Tab functionality for Bootstrap
+        $('#patentSourceTab a').on('click', function (e) {
+            e.preventDefault();
+            $(this).tab('show');
+        });
+
+        // Clear the other input when one is chosen for patent source
+        const patentFileInput = document.getElementById('patent_file');
+        const patentUrlInput = document.getElementById('patent_url');
+
+        patentFileInput.addEventListener('change', function() {
+            if (this.files.length > 0) {
+                patentUrlInput.value = ''; // Clear URL if file is selected
+            }
+        });
+
+        patentUrlInput.addEventListener('input', function() {
+            if (this.value.trim() !== '') {
+                patentFileInput.value = ''; // Clear file input if URL is typed
+                // Also reset the custom file input label
+                let fileLabel = patentFileInput.nextElementSibling;
+                if (fileLabel && fileLabel.classList.contains('custom-file-label')) {
+                    fileLabel.innerText = '选择文件...';
+                }
+            }
+        });
+    });
+</script>
+{% endblock %}

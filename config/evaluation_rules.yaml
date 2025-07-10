@@ -1,0 +1,58 @@
+# 专利侵权评估规则示例
+# 这些规则可以被LLM用作参考，或者在后处理步骤中由代码直接使用
+
+evaluation_criteria:
+  - name: "技术特征匹配度"
+    weight: 0.5 # 权重 (0-1)，代表此标准在总评估中的重要性
+    description: "评估目标技术方案与专利权利要求中记载的技术特征的相似程度。"
+    # threshold: 0.7 # 匹配度阈值，例如，可以设定一个数值，超过该数值则认为匹配度高
+
+  - name: "权利要求的字面覆盖范围"
+    weight: 0.3
+    description: "分析目标技术方案是否落入专利权利要求的字面保护范围。"
+
+  - name: "等同原则适用性"
+    weight: 0.2
+    description: "在不构成字面侵权的情况下，评估目标技术方案的技术特征与专利权利要求的技术特征是否构成等同。"
+    # sub_criteria:
+    #   - name: "基本相同的手段"
+    #   - name: "实现基本相同的功能"
+    #   - name: "达到基本相同的效果"
+    #   - name: "对于本领域普通技术人员来说是否显而易见"
+
+  - name: "现有技术抗辩"
+    weight: 0.0 # 通常这个不由LLM直接评分，而是作为是否构成侵权的否决条件
+    description: "评估目标技术方案是否属于现有技术或现有设计的范畴。"
+
+  - name: "禁止反悔原则"
+    weight: 0.0 # 同上，更多是法律原则的适用判断
+    description: "审查专利权人在专利授权或无效宣告程序中，为克服驳回理由或无效理由而对权利要求、说明书、附图所作的限制或者部分放弃，是否对当前侵权判定构成影响。"
+
+  - name: "时间有效性"
+    weight: 0.1 # 可以根据实际情况调整权重或移除
+    description: "确认被比较的技术方案或产品是否在专利有效期内出现。"
+    # check_patent_expiration: true
+    # check_infringement_activity_date: true
+
+  - name: "地域覆盖检查"
+    weight: 0.1 # 可以根据实际情况调整权重或移除
+    description: "确认侵权行为是否发生在专利保护的地域范围内。"
+    # check_patent_jurisdiction: true
+    # check_infringement_location: true
+
+# 风险等级定义 (示例)
+# 可以基于总得分或其他逻辑来判定
+risk_levels:
+  - level: "高风险"
+    condition: "总匹配度得分 >= 70%" # 示例条件
+    recommendation: "建议立即进行详细的法律和技术分析，并考虑采取法律行动。"
+  - level: "中风险"
+    condition: "总匹配度得分 >= 50% AND 总匹配度得分 < 70%"
+    recommendation: "建议进一步监控，并收集更多证据，咨询法务专家。"
+  - level: "低风险"
+    condition: "总匹配度得分 < 50%"
+    recommendation: "当前风险较低，但仍需保持关注，特别是当对方产品或技术发生变化时。"
+
+# 注意: LLM在实际分析中可能不会严格按照这些权重进行数学计算，
+# 而是将这些标准作为理解任务和生成报告的指导。
+# 具体的“匹配度得分”等可以由LLM基于其内部逻辑给出，或者结合外部算法（如TF-IDF）后，再由LLM综合判断。

@@ -1,0 +1,255 @@
+{% extends "layout.html" %}
+
+{% block title %}分析进行中{% endblock %}
+
+{% block head_extra %}
+<style>
+    .analyzing-container {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        min-height: 60vh; /* Adjust as needed */
+        text-align: center;
+    }
+    .spinner-large {
+        width: 5rem;
+        height: 5rem;
+        border-width: .4em;
+    }
+    .status-messages {
+        margin-top: 20px;
+        font-size: 1.1em;
+        color: #495057;
+    }
+    .status-messages ul {
+        list-style-type: none;
+        padding-left: 0;
+    }
+    .status-messages ul li {
+        margin-bottom: 8px;
+        opacity: 0.5; /* Start with opacity for pending tasks */
+    }
+    .status-messages ul li.completed {
+        opacity: 1;
+        color: #28a745; /* Green for completed */
+        font-weight: bold;
+    }
+    .status-messages ul li.processing {
+        opacity: 1;
+        color: #007bff; /* Blue for processing */
+        font-weight: bold;
+    }
+    .status-messages ul li.completed::before {
+        content: "✓ ";
+        margin-right: 5px;
+    }
+    .status-messages ul li.processing::before {
+        content: "⏳ "; /* Hourglass or similar */
+        margin-right: 5px;
+        animation: spin 1.5s linear infinite; /* Add a spinning animation to the emoji */
+    }
+
+    @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+    }
+
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="analyzing-container">
+    <div class="spinner-border text-primary spinner-large" role="status">
+        <span class="sr-only">分析中...</span>
+    </div>
+    <h3 class="mt-4">正在分析您的专利和线索文件...</h3>
+    <p class="text-muted">这可能需要几分钟时间，请耐心等待。处理完成后，页面将自动跳转到结果报告。</p>
+
+    <div id="status-messages" class="status-messages">
+        <p><strong>处理阶段：</strong></p>
+        <ul>
+            <li id="status-upload">文件上传与预处理</li>
+            <li id="status-patent-extraction">核心专利文本提取</li>
+            <li id="status-evidence-extraction">侵权线索文件解析</li>
+            <!-- <li id="status-search">互联网搜索潜在侵权线索</li> -->
+            <li id="status-llm-analysis">LLM大模型分析与评估</li>
+            <li id="status-report-generation">生成分析报告</li>
+        </ul>
+    </div>
+     <p class="mt-3 text-muted" id="eta-message">预计剩余时间：正在计算...</p>
+</div>
+{% endblock %}
+
+{% block scripts_extra %}
+<script>
+    // This script will periodically check the status or wait for a redirect.
+    // For a more dynamic experience, you would use AJAX polling or WebSockets
+    // to update the status messages.
+
+    // Example: Simulate progress and redirect (replace with actual logic)
+    // const analysisId = "{{ analysis_id }}"; // Get from server if available
+    const reportFilename = "{{ report_filename }}";
+    const error = "{{ error }}";
+
+    let currentStep = 0;
+    const steps = [
+        "status-upload",
+        "status-patent-extraction",
+        "status-evidence-extraction",
+        // "status-search",
+        "status-llm-analysis",
+        "status-report-generation"
+    ];
+
+    let totalTime = parseInt("{{ estimated_time }}") || 180; // Default to 3 minutes if not provided
+    let elapsedTime = 0;
+    const etaMessageElement = document.getElementById('eta-message');
+
+    function updateStatus() {
+        if (error) {
+            // If there was an error during submission before even getting to this page.
+            const container = document.querySelector('.analyzing-container');
+            container.innerHTML = `
+                <h3 class="text-danger">分析启动失败</h3>
+                <p>${error}</p>
+                <a href="{{ url_for('index') }}" class="btn btn-primary mt-3">返回上传页面</a>
+            `;
+            if(etaInterval) clearInterval(etaInterval);
+            return;
+        }
+
+
+        if (currentStep < steps.length) {
+            const currentStepId = steps[currentStep];
+            const currentStepElement = document.getElementById(currentStepId);
+            if (currentStepElement) {
+                currentStepElement.classList.remove('completed'); // remove if it was there from a previous run
+                currentStepElement.classList.add('processing');
+            }
+
+            if (currentStep > 0) {
+                const prevStepId = steps[currentStep - 1];
+                const prevStepElement = document.getElementById(prevStepId);
+                 if (prevStepElement) {
+                    prevStepElement.classList.remove('processing');
+                    prevStepElement.classList.add('completed');
+                }
+            }
+            currentStep++;
+        } else {
+             // Last step completed
+            const lastStepElement = document.getElementById(steps[steps.length - 1]);
+            if (lastStepElement) {
+                lastStepElement.classList.remove('processing');
+                lastStepElement.classList.add('completed');
+            }
+        }
+    }
+
+    function updateETA() {
+        elapsedTime += 1;
+        const remainingTime = Math.max(0, totalTime - elapsedTime);
+        const minutes = Math.floor(remainingTime / 60);
+        const seconds = remainingTime % 60;
+        if (etaMessageElement) {
+            etaMessageElement.textContent = `预计剩余时间：${minutes}分 ${seconds.toString().padStart(2, '0')}秒`;
+        }
+        if (remainingTime <=0 && etaInterval) {
+             etaMessageElement.textContent = `处理时间可能比预期稍长，请继续耐心等待...`;
+             // clearInterval(etaInterval); // Don't clear, let it run, or user might think it's stuck
+        }
+    }
+
+    let statusInterval;
+    let etaInterval;
+
+    if (!error && reportFilename) { // Only start polling if there's a report filename to check for
+        // Initial status update
+        updateStatus(); // Mark first step as processing
+        statusInterval = setInterval(updateStatus, (totalTime * 1000) / (steps.length +1) ); // Spread updates over estimated time
+        etaInterval = setInterval(updateETA, 1000);
+
+
+        // Poll for the report file or a status update
+        const pollInterval = 5000; // Poll every 5 seconds
+        let pollTimer = setInterval(() => {
+            fetch("{{ url_for('check_analysis_status', report_filename=report_filename) }}")
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'completed') {
+                        clearInterval(pollTimer);
+                        if(statusInterval) clearInterval(statusInterval);
+                        if(etaInterval) clearInterval(etaInterval);
+                        // Ensure all steps are marked completed visually
+                        steps.forEach(stepId => {
+                             const el = document.getElementById(stepId);
+                             if(el) {
+                                 el.classList.remove('processing');
+                                 el.classList.add('completed');
+                             }
+                        });
+                        etaMessageElement.textContent = "分析完成！正在跳转到报告页面...";
+                        window.location.href = "{{ url_for('view_report', report_filename=report_filename) }}";
+                    } else if (data.status === 'failed') {
+                        clearInterval(pollTimer);
+                        if(statusInterval) clearInterval(statusInterval);
+                        if(etaInterval) clearInterval(etaInterval);
+                        const container = document.querySelector('.analyzing-container');
+                        // Try to mark the failing step
+                        if(data.failed_step && steps.includes("status-" + data.failed_step)){
+                            const failedStepElement = document.getElementById("status-" + data.failed_step);
+                            if(failedStepElement) {
+                                failedStepElement.classList.remove('processing');
+                                failedStepElement.classList.add('text-danger');
+                                failedStepElement.innerHTML += " (失败)";
+                            }
+                        }
+                        container.innerHTML = `
+                            <h3 class="text-danger mt-4">分析失败</h3>
+                            <p>${data.error || "分析过程中发生未知错误。"}</p>
+                            <p>失败阶段: ${data.failed_step_message || 'N/A'}</p>
+                            <a href="{{ url_for('index') }}" class="btn btn-primary mt-3">返回上传页面</a>
+                        `;
+                    } else if (data.status === 'processing' && data.current_step) {
+                        // Update visual progress based on server's current step
+                        const serverStepIndex = steps.indexOf("status-" + data.current_step);
+                        if (serverStepIndex >= currentStep) { // only advance, don't go back
+                            while(currentStep <= serverStepIndex){
+                                updateStatus();
+                            }
+                        }
+                         if(data.progress_message){
+                            const currentStepElement = document.getElementById("status-" + data.current_step);
+                            if(currentStepElement && currentStepElement.classList.contains('processing')){
+                                let messageSpan = currentStepElement.querySelector('.progress-detail');
+                                if(!messageSpan){
+                                    messageSpan = document.createElement('span');
+                                    messageSpan.className = 'progress-detail font-italic ml-2';
+                                    currentStepElement.appendChild(messageSpan);
+                                }
+                                messageSpan.textContent = `- ${data.progress_message}`;
+                            }
+                        }
+                    }
+                    // else: still processing, continue polling
+                })
+                .catch(err => {
+                    console.error("Error polling for status:", err);
+                    // Potentially stop polling after too many errors or inform user
+                });
+        }, pollInterval);
+    } else if(error) {
+        // Handle error passed directly to this page (e.g., from initial submission fail)
+        updateStatus();
+    } else {
+        // Fallback if report_filename is somehow not provided but no error either
+        const container = document.querySelector('.analyzing-container');
+        container.innerHTML = `
+            <h3 class="text-warning">无法开始分析</h3>
+            <p>缺少必要的分析任务ID。请返回重试。</p>
+            <a href="{{ url_for('index') }}" class="btn btn-primary mt-3">返回上传页面</a>
+        `;
+    }
+</script>
+{% endblock %}

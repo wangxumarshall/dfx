@@ -1,0 +1,24 @@
+Flask>=2.0
+requests>=2.25
+PyPDF2>=3.0.0 # Updated to a common recent version
+python-docx>=0.8.11
+Markdown>=3.3.4
+openai>=0.27.0 # Or your specific LLM client library
+PyYAML>=5.4
+Werkzeug>=2.0 # Usually a Flask dependency, but good to specify
+scikit-learn>=0.24 # For TF-IDF if used as described in docs, can be optional if LLM handles all
+pytesseract>=0.3.8 # For OCR
+pdfplumber>=0.7.0 # Alternative/Advanced PDF text extraction, good for OCR prep
+WeasyPrint>=52.5 # For PDF generation from HTML (optional, but in current app.py)
+# Pillow>=9.0.0 # Dependency for pytesseract and potentially pdfplumber or other image tasks
+
+# Notes:
+# 1. `sklearn` (scikit-learn) is listed based on the project description mentioning TF-IDF.
+#    If the LLM is expected to handle all similarity/matching, this might become optional.
+# 2. `pytesseract` requires Tesseract OCR engine to be installed on the system.
+# 3. `WeasyPrint` has system dependencies for fonts and graphics libraries (like Pango, Cairo, GDK-PixBuf).
+#    Users might need to install these separately, e.g., `sudo apt-get install libpango-1.0-0 libcairo2 libgdk-pixbuf2.0-0` on Debian/Ubuntu.
+# 4. Consider adding version pinning for all dependencies for more reproducible builds (e.g., Flask==2.1.2).
+#    The versions above are examples and should be tested for compatibility.
+# 5. `openai` is a placeholder; if using DeepSeek or another LLM, the specific client library and version should be listed.
+# 6. `Pillow` is often a transitive dependency but can be listed explicitly if direct image manipulation is planned.

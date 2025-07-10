@@ -1,0 +1,123 @@
+/* General Body Styles */
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    line-height: 1.6;
+    background-color: #f4f7f6; /* Light gray background */
+    color: #333;
+    padding-top: 70px; /* Account for fixed navbar */
+}
+
+/* Navbar Customization */
+.navbar {
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.navbar-brand {
+    font-weight: bold;
+    font-size: 1.5rem;
+}
+
+/* Container and Card Styling */
+.container {
+    max-width: 1140px; /* Standard bootstrap container width for lg */
+}
+
+.card {
+    margin-bottom: 1.5rem;
+    border: none; /* Remove default card border */
+    box-shadow: 0 0 15px rgba(0,0,0,0.05); /* Softer shadow */
+}
+
+.card-header {
+    background-color: #e9ecef; /* Lighter header */
+    font-weight: 500;
+    border-bottom: 1px solid #dee2e6;
+}
+
+/* Form Elements */
+.form-group label {
+    font-weight: 500;
+    color: #495057;
+}
+
+.custom-file-label::after {
+    content: "浏览"; /* Ensure Chinese label for browse button */
+}
+
+/* Buttons */
+.btn-primary {
+    background-color: #007bff;
+    border-color: #007bff;
+    transition: background-color 0.2s ease-in-out;
+}
+
+.btn-primary:hover {
+    background-color: #0056b3;
+    border-color: #0056b3;
+}
+
+.btn-lg {
+    padding: 0.75rem 1.5rem;
+    font-size: 1.1rem;
+}
+
+/* Footer */
+.footer {
+    background-color: #343a40; /* Dark footer */
+    color: #f8f9fa;
+    padding: 1rem 0;
+    position: relative; /* Changed from fixed to relative for normal flow */
+    bottom: 0;
+    width: 100%;
+    margin-top: 40px; /* Add some space before footer */
+}
+.footer .text-muted {
+    color: #adb5bd !important; /* Override bootstrap's text-muted for dark background */
+}
+
+
+/* Alerts */
+.alert {
+    border-radius: .25rem;
+}
+
+/* Utility Classes */
+.mb-4 {
+    margin-bottom: 1.5rem !important;
+}
+
+/* Specific to analyzing page */
+.analyzing-container {
+    padding-top: 40px;
+    padding-bottom: 40px;
+}
+
+/* Specific to report page */
+.report-container {
+    background-color: #fff;
+    padding: 25px;
+    border-radius: 5px;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.07);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    body {
+        padding-top: 56px; /* Adjust for smaller navbar height */
+    }
+    .navbar-brand {
+        font-size: 1.25rem;
+    }
+    .container {
+        padding-left: 20px;
+        padding-right: 20px;
+    }
+}
+
+/* Custom file input label update */
+.custom-file-input:lang(zh-CN) ~ .custom-file-label::after {
+    content: "浏览";
+}
+.custom-file-input:lang(en) ~ .custom-file-label::after {
+    content: "Browse";
+}
