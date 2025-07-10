@@ -1,4 +1,4 @@
-# PMAS - 专利侵权分析平台 (AI增强版)
+# PMAS - 专利侵权分析平台
 
 PMAS (Patent Infringement Analysis System) 是一个旨在利用大型语言模型（LLM）和AI技术，分析专利文档并从提供的线索文件中挖掘潜在专利侵权风险的平台。
 
