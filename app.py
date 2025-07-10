@@ -2,424 +2,488 @@ import os
 from flask import Flask, render_template, request, redirect, url_for, send_from_directory, jsonify
 from werkzeug.utils import secure_filename
 import requests
-import PyPDF2
-import markdown as md
-# import docx # python-docx
-# from PIL import Image # For OCR with pytesseract
-# import pytesseract # For OCR
+import PyPDF2 # Will be indirectly used by PatentFileParser
+import markdown as md # Used for PDF generation and in PatentFileParser
+# import docx # python-docx - Handled by PatentFileParser
+# from PIL import Image # For OCR with pytesseract - Handled by PatentFileParser
+# import pytesseract # For OCR - Handled by PatentFileParser
 import json
 import time
-
-# --- Configuration ---
-UPLOAD_FOLDER = 'uploads'
-REPORTS_FOLDER = 'reports'
-ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'md', 'txt'}
-
-app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
-app.config['REPORTS_FOLDER'] = REPORTS_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max upload size
-
-# Ensure upload and report directories exist
-os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(REPORTS_FOLDER, exist_ok=True)
-
 import uuid
-from flask import flash # Added for flashing messages
+from flask import flash, current_app # Added current_app for factory pattern
 import shutil # For operations like deleting a directory tree
+from threading import Thread # For background tasks
 
-# --- Configuration Loading ---
-try:
-    from config import settings
-except ImportError:
-    print("ERROR: config/settings.py not found or has errors. Please ensure it exists and is correctly configured.")
-    # Provide some default fallbacks or exit
-    class settings: #type: ignore
-        OPENAI_API_KEY = "YOUR_FALLBACK_OPENAI_KEY"
-        SERP_API_KEY = "YOUR_FALLBACK_SERP_KEY"
-        UPLOAD_FOLDER = 'uploads'
-        REPORTS_FOLDER = 'reports'
-        ALLOWED_EXTENSIONS = {'pdf', 'doc', 'docx', 'md', 'txt', 'zip'}
-        MAX_CONTENT_LENGTH = 16 * 1024 * 1024
-        SIMULATE_LLM = True # Important for testing without real API calls
-        SIMULATE_LLM_DELAY = 2
-        TESSERACT_CMD = 'tesseract' # Default for Linux/macOS
+# --- New Module Imports ---
+from modules.patent_parser import PatentFileParser
+from modules.clue_acquisition import ClueAcquirer
+from modules.evidence_matcher import EvidenceMatcher
+from modules.reliability_assessor import ReliabilityAssessor
+from modules.report_generator import ReportGenerator
 
-app.config['UPLOAD_FOLDER'] = settings.UPLOAD_FOLDER
-app.config['REPORTS_FOLDER'] = settings.REPORTS_FOLDER
-app.config['MAX_CONTENT_LENGTH'] = settings.MAX_CONTENT_LENGTH
-app.secret_key = os.urandom(24) # Needed for flash messages
-
-# Ensure upload and report directories exist
-os.makedirs(settings.UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(settings.REPORTS_FOLDER, exist_ok=True)
-# Create a session-specific uploads sub-directory parent
-SESSION_UPLOADS_PARENT = os.path.join(settings.UPLOAD_FOLDER, 'session_data')
-os.makedirs(SESSION_UPLOADS_PARENT, exist_ok=True)
+# --- Global dictionary to track analysis status (remains global for simplicity for now) ---
+# In a more complex app, this might be managed by a service or database.
+analysis_status_db = {} # report_filename -> {"status": "processing/completed/failed", "error": "...", "current_step": "...", "progress_message": "..."}
 
 
 # --- Utility Functions ---
-def allowed_file(filename):
+# allowed_file can use current_app.config if settings are loaded into app.config
+def allowed_file(filename, app_config):
     return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in settings.ALLOWED_EXTENSIONS
+           filename.rsplit('.', 1)[1].lower() in app_config['ALLOWED_EXTENSIONS']
 
-# --- Core Logic Imports (placeholders for now) ---
-# from core import file_parser, llm_analyzer, report_generator
 
-# --- Global dictionary to track analysis status ---
-# In a production environment, use a database or a more robust cache (e.g., Redis)
-analysis_status_db = {} # report_filename -> {"status": "processing/completed/failed", "error": "...", "current_step": "...", "progress_message": "..."}
+# --- Application Factory ---
+def create_app():
+    app = Flask(__name__)
 
-# --- Routes ---
-@app.route('/')
-def index():
-    return render_template('index.html')
+    # --- Configuration Loading ---
+    try:
+        from config import main_config as settings_module
+        app.config.from_object(settings_module) # Load main_config into app.config
+        # For consistency, let's alias settings_module to settings for utility functions if needed
+        # However, best practice is to use app.config directly within request contexts or pass it.
+    except ImportError:
+        print("ERROR: config/main_config.py not found or has errors. Using fallback app configurations.")
+        # Fallback configurations directly on app.config
+        app.config['OPENAI_API_KEY'] = "YOUR_FALLBACK_OPENAI_KEY"
+        app.config['SERP_API_KEY'] = "YOUR_FALLBACK_SERP_KEY"
+        app.config['UPLOAD_FOLDER'] = 'uploads_fallback'
+        app.config['REPORTS_FOLDER'] = 'reports_fallback'
+        app.config['ALLOWED_EXTENSIONS'] = {'pdf', 'doc', 'docx', 'md', 'txt', 'zip'}
+        app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024
+        app.config['SIMULATE_LLM'] = True
+        app.config['SIMULATE_LLM_DELAY'] = 2
+        app.config['TESSERACT_CMD'] = 'tesseract'
+        # Ensure these are also set if main_config is missing
+        app.config['PATENT_PARSER_CONFIG'] = {} # Placeholder
+        app.config['CLUE_ACQUISITION_CONFIG'] = {} # Placeholder
+        app.config['EVIDENCE_MATCHER_CONFIG'] = {} # Placeholder
+        app.config['RELIABILITY_ASSESSOR_CONFIG'] = {} # Placeholder
+        app.config['REPORT_GENERATOR_CONFIG'] = {} # Placeholder
 
-@app.route('/upload', methods=['POST'])
-def upload_and_analyze():
-    """
-    Handles file uploads (patent and evidence) and URL inputs.
-    Triggers the analysis process.
-    """
-    if request.method == 'POST':
-        patent_file = request.files.get('patent_file')
-        patent_url = request.form.get('patent_url', '').strip()
-        evidence_files = request.files.getlist('evidence_files[]') # For multiple files or a single zip
+    # Load module-specific configs (can be done here or within modules if they access app.config)
+    # For simplicity, modules currently load their own .py configs directly.
+    # If we wanted them to use app.config, we'd load them here:
+    # try:
+    #     from config import patent_parser_config
+    #     app.config.from_object(patent_parser_config)
+    # except ImportError: print("WARN: patent_parser_config.py not found")
+    # ... and so on for other module configs.
+    # For now, modules' direct import of their configs is simpler and already implemented.
 
-        # Create a unique session ID for this analysis run
-        session_id = str(uuid.uuid4())
-        session_upload_dir = os.path.join(SESSION_UPLOADS_PARENT, session_id)
-        os.makedirs(session_upload_dir, exist_ok=True)
+    app.secret_key = os.urandom(24) # Needed for flash messages
 
-        patent_doc_path = None
-        evidence_docs_paths = [] # This will store paths to individual evidence files (extracted from zip if necessary)
-        evidence_input_type = None # 'files' or 'zip'
+    # Ensure upload and report directories exist using app.config
+    os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+    os.makedirs(app.config['REPORTS_FOLDER'], exist_ok=True)
 
-        # 1. Process Patent File/URL
-        if patent_file and patent_file.filename != '' and allowed_file(patent_file.filename):
-            filename = secure_filename(patent_file.filename)
-            patent_doc_path = os.path.join(session_upload_dir, "patent_" + filename)
-            patent_file.save(patent_doc_path)
-        elif patent_url:
-            try:
-                response = requests.get(patent_url, timeout=10)
-                response.raise_for_status() # Raise an exception for HTTP errors
-                # Sanitize URL to create a safe filename
-                url_filename = secure_filename(patent_url.split('/')[-1] or "patent_from_url.html")
-                if not url_filename.endswith(('.html', '.htm', '.txt', '.pdf')): # Basic check
-                    url_filename += ".html" # Assume html if no clear extension
+    # Create a session-specific uploads sub-directory parent
+    # This path should also use app.config['UPLOAD_FOLDER']
+    app.config['SESSION_UPLOADS_PARENT'] = os.path.join(app.config['UPLOAD_FOLDER'], 'session_data')
+    os.makedirs(app.config['SESSION_UPLOADS_PARENT'], exist_ok=True)
 
-                patent_doc_path = os.path.join(session_upload_dir, "patent_" + url_filename)
-                with open(patent_doc_path, 'wb') as f:
-                    f.write(response.content)
-            except requests.RequestException as e:
-                flash(f"专利URL下载失败: {e}", "danger")
+
+    # --- Instantiate Core Modules ---
+    # These instances can be stored on the app object if they need to be accessed across requests
+    # and are configured based on app.config, or if their instantiation is costly.
+    # For now, modules mostly self-configure by importing their config files.
+    # If they needed app.config, we would pass it: app.patent_parser = PatentFileParser(app.config)
+
+    # Storing on 'g' is not suitable as they are needed outside request context by the thread.
+    # Making them part of the app context or simply instantiating them globally/per-call (if lightweight)
+    # For the background thread, it's easier if these are accessible.
+    # Let's define them here, and the background thread function will be defined within create_app
+    # or receive these instances as arguments.
+
+    # These are instantiated once when the app is created.
+    # Modules currently load their own configs, which is fine for now.
+    # If a module's config depends on main_config, it should import main_config.
+    app.patent_parser = PatentFileParser()
+    app.clue_acquirer = ClueAcquirer() # ClueAcquirer instantiates its own PatentFileParser
+    app.evidence_matcher = EvidenceMatcher()
+    app.reliability_assessor = ReliabilityAssessor()
+    app.report_generator = ReportGenerator()
+
+    # --- Register Blueprints (if any) ---
+    # Example: from .routes import main_blueprint; app.register_blueprint(main_blueprint)
+
+    # --- Define Routes (or import from a routes file/blueprint) ---
+    # Routes need access to 'app' for decorators like @app.route
+    # We can define them within create_app or ensure they use a Blueprint.
+    # For simplicity in this refactor, routes will be defined here.
+
+    @app.route('/')
+    def index():
+        return render_template('index.html')
+
+    @app.route('/upload', methods=['POST'])
+    def upload_and_analyze():
+        """
+        Handles file uploads (patent and evidence) and URL inputs.
+        Triggers the analysis process using the new modular pipeline.
+        """
+        # Use current_app.config for all configurations
+        config = current_app.config
+
+        if request.method == 'POST':
+            patent_file = request.files.get('patent_file')
+            patent_url = request.form.get('patent_url', '').strip()
+            evidence_files = request.files.getlist('evidence_files[]')
+
+            # --- TODO: Add new fields from frontend for "Online Mining Mode" ---
+            # search_target_company = request.form.get('target_company', '').strip()
+            # search_excluded_companies = request.form.get('excluded_companies', '').strip() # Needs parsing if comma-separated
+            # search_focus_areas = request.form.get('focus_areas', '').strip()
+            # current_mode = request.form.get('analysis_mode', 'local') # 'local' or 'online_search'
+
+            session_id = str(uuid.uuid4())
+            session_upload_dir = os.path.join(config['SESSION_UPLOADS_PARENT'], session_id)
+            os.makedirs(session_upload_dir, exist_ok=True)
+
+            patent_doc_path = None
+            processed_evidence_sources = [] # This will store paths for local, or search params for API
+
+            # 1. Process Patent File/URL
+            if patent_file and patent_file.filename != '' and allowed_file(patent_file.filename, config):
+                filename = secure_filename(patent_file.filename)
+                patent_doc_path = os.path.join(session_upload_dir, "patent_" + filename)
+                patent_file.save(patent_doc_path)
+            elif patent_url:
+                try:
+                    response = requests.get(patent_url, timeout=10)
+                    response.raise_for_status()
+                    url_filename = secure_filename(patent_url.split('/')[-1] or "patent_from_url.html")
+                    if not any(url_filename.endswith(ext) for ext in ['.html', '.htm', '.txt', '.pdf']):
+                        url_filename += ".html"
+                    patent_doc_path = os.path.join(session_upload_dir, "patent_" + url_filename)
+                    with open(patent_doc_path, 'wb') as f: f.write(response.content)
+                except requests.RequestException as e:
+                    flash(f"专利URL下载失败: {e}", "danger")
+                    shutil.rmtree(session_upload_dir, ignore_errors=True)
+                    return redirect(url_for('index'))
+            else:
+                flash("必须提供专利文件或专利URL。", "danger")
                 shutil.rmtree(session_upload_dir, ignore_errors=True)
                 return redirect(url_for('index'))
-        else:
-            flash("必须提供专利文件或专利URL。", "danger")
-            shutil.rmtree(session_upload_dir, ignore_errors=True)
-            return redirect(url_for('index'))
 
-        # 2. Process Evidence Files (can be multiple files or a single ZIP)
-        temp_evidence_dir = os.path.join(session_upload_dir, "evidence_files")
-        os.makedirs(temp_evidence_dir, exist_ok=True)
+            # 2. Process Evidence (depends on mode - for now, still using local file evidence)
+            # This part will need significant change when online search mode is fully integrated
+            # For now, assume 'local' mode for evidence files.
 
-        if evidence_files and evidence_files[0].filename != '':
-            is_zip_upload = any(f.filename.lower().endswith('.zip') for f in evidence_files)
+            temp_evidence_dir = os.path.join(session_upload_dir, "evidence_files")
+            os.makedirs(temp_evidence_dir, exist_ok=True)
 
-            if is_zip_upload:
-                if len(evidence_files) > 1:
-                    flash("如果上传ZIP文件，请只选择一个ZIP文件作为侵权线索。", "warning")
-                    # Potentially take the first zip and ignore others, or error out
+            if evidence_files and evidence_files[0].filename != '':
+                is_zip_upload = any(f.filename.lower().endswith('.zip') for f in evidence_files)
+                if is_zip_upload:
+                    # ... (ZIP processing logic - unchanged, but uses 'config' for allowed_file)
+                    # Ensure allowed_file calls pass 'config'
+                    zip_file = next((f for f in evidence_files if f.filename.lower().endswith('.zip')), None)
+                    if zip_file and allowed_file(zip_file.filename, config):
+                        zip_filename = secure_filename(zip_file.filename)
+                        zip_path = os.path.join(session_upload_dir, zip_filename)
+                        zip_file.save(zip_path)
+                        try:
+                            import zipfile
+                            with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+                                for member in zip_ref.namelist():
+                                    if allowed_file(member, config) and not member.startswith('__MACOSX'):
+                                        if not member.endswith('/'):
+                                            target_path = os.path.join(temp_evidence_dir, os.path.basename(member))
+                                            source = zip_ref.open(member)
+                                            target_file_handle = open(target_path, "wb")
+                                            with source, target_file_handle:
+                                                shutil.copyfileobj(source, target_file_handle)
+                                            processed_evidence_sources.append(target_path)
+                            os.remove(zip_path)
+                        except zipfile.BadZipFile:
+                            flash("上传的侵权线索ZIP文件无效或已损坏。", "danger"); shutil.rmtree(session_upload_dir, ignore_errors=True); return redirect(url_for('index'))
+                        except Exception as e:
+                            flash(f"解压侵权线索ZIP文件时出错: {e}", "danger"); shutil.rmtree(session_upload_dir, ignore_errors=True); return redirect(url_for('index'))
+                    else: flash("提供的侵权线索ZIP文件类型不允许。", "warning")
 
-                zip_file = next((f for f in evidence_files if f.filename.lower().endswith('.zip')), None)
-                if zip_file and allowed_file(zip_file.filename):
-                    zip_filename = secure_filename(zip_file.filename)
-                    zip_path = os.path.join(session_upload_dir, zip_filename)
-                    zip_file.save(zip_path)
+                if not processed_evidence_sources: # If not a zip or zip failed
+                    for file_item in evidence_files:
+                        if file_item and file_item.filename != '' and allowed_file(file_item.filename, config) and not file_item.filename.lower().endswith('.zip'):
+                            filename = secure_filename(file_item.filename)
+                            evidence_file_path = os.path.join(temp_evidence_dir, filename)
+                            file_item.save(evidence_file_path)
+                            processed_evidence_sources.append(evidence_file_path)
 
-                    try:
-                        import zipfile
-                        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-                            # Extract only allowed file types from ZIP
-                            for member in zip_ref.namelist():
-                                if allowed_file(member) and not member.startswith('__MACOSX'): # Basic security
-                                    # Sanitize member name before extracting
-                                    # member_filename = secure_filename(os.path.basename(member))
-                                    # if not member_filename: continue # Skip if filename becomes empty after sanitizing
+            # If no evidence files are provided for local mode, processed_evidence_sources will be empty.
+            # The ClueAcquirer's local mode should handle an empty list if this means "no local files to parse".
+            # Or, if ClueAcquirer expects a directory, we could pass temp_evidence_dir.
+            # For now, pass the list of files. If it's empty, ClueAcquirer should return empty list of clues.
 
-                                    # To preserve directory structure within zip, need careful handling
-                                    # For now, flatten and make sure filenames are unique if needed, or prefix
-                                    target_path = os.path.join(temp_evidence_dir, os.path.basename(member))
-                                    # Ensure the target directory for the file exists if it's in a subfolder in zip
-                                    # os.makedirs(os.path.dirname(target_path), exist_ok=True) # This is risky without more sanitization
-
-                                    # Safer: extract to a unique name if there are subdirs, or flatten
-                                    # For now, let's assume simple zip structure or flatten
-                                    # If the member is a directory, zip_ref.extract will handle it by creating it.
-                                    # We only want files.
-                                    if not member.endswith('/'): # it's a file
-                                        source = zip_ref.open(member)
-                                        target = open(target_path, "wb")
-                                        with source, target:
-                                            shutil.copyfileobj(source, target)
-                                        evidence_docs_paths.append(target_path)
-                        os.remove(zip_path) # Remove original zip after extraction
-                        evidence_input_type = 'zip'
-                    except zipfile.BadZipFile:
-                        flash("上传的侵权线索ZIP文件无效或已损坏。", "danger")
-                        shutil.rmtree(session_upload_dir, ignore_errors=True)
-                        return redirect(url_for('index'))
-                    except Exception as e:
-                        flash(f"解压侵权线索ZIP文件时出错: {e}", "danger")
-                        shutil.rmtree(session_upload_dir, ignore_errors=True)
-                        return redirect(url_for('index'))
-                else:
-                    flash("提供的侵权线索ZIP文件类型不允许。", "warning") # Or ignore if other valid files are present
-
-            if not evidence_docs_paths: # If not a zip or zip processing failed and there are other files
-                for file in evidence_files:
-                    if file and file.filename != '' and allowed_file(file.filename) and not file.filename.lower().endswith('.zip'):
-                        filename = secure_filename(file.filename)
-                        evidence_file_path = os.path.join(temp_evidence_dir, filename)
-                        file.save(evidence_file_path)
-                        evidence_docs_paths.append(evidence_file_path)
-                if evidence_docs_paths:
-                     evidence_input_type = 'files'
-
-        if not evidence_docs_paths: # No evidence files provided at all
-            # flash("请至少提供一个侵权线索文件或包含线索的ZIP包。", "warning")
-            # Allow proceeding without evidence, LLM can work on patent only or search later
-            pass
+            # For 'online_search' mode, processed_evidence_sources would be a dict of search params
+            # e.g., {'search_terms': '...', 'target_company': '...'}
 
 
-        # Generate a unique filename for the report (e.g., based on patent name or timestamp)
-        # For now, use a timestamp / UUID
-        timestamp = time.strftime("%Y%m%d-%H%M%S")
-        report_base_name = f"report_{timestamp}_{session_id[:8]}.md"
-        report_filename_md = os.path.join(settings.REPORTS_FOLDER, report_base_name)
+            timestamp = time.strftime("%Y%m%d-%H%M%S")
+            report_base_name = f"report_{timestamp}_{session_id[:8]}.md"
+            report_filepath = os.path.join(config['REPORTS_FOLDER'], report_base_name)
 
-        # Store initial status
-        analysis_status_db[report_base_name] = {"status": "processing", "current_step": "upload", "progress_message": "文件接收完毕"}
+            analysis_status_db[report_base_name] = {"status": "processing", "current_step": "upload", "progress_message": "文件接收完毕，准备开始分析..."}
 
-        # TODO: Trigger the actual analysis in a background thread/task queue
-        # For now, we'll simulate a delay and then "complete" it for redirection.
-        # In a real app, this would be:
-        # from threading import Thread
-        # thread = Thread(target=run_full_analysis, args=(patent_doc_path, evidence_docs_paths, report_filename_md, session_id, report_base_name))
-        # thread.start()
+            # Pass module instances to the thread
+            # Note: if modules are not thread-safe or share state in a non-thread-safe way, this could be an issue.
+            # For now, assuming their methods are re-entrant or they manage their own state appropriately per call.
+            # The app context is not available in the new thread by default.
+            # Pass necessary config values if modules can't access current_app.config.
+            # However, our modules currently load their own configs or main_config directly.
 
-        # For now, let's just pass data to analyzing page. The actual analysis will be mocked there or via status checks
-        # This is a simplified flow for now.
-        # The run_full_analysis function would handle all steps:
-        # 1. file_parser.extract_text_from_patent(patent_doc_path)
-        # 2. file_parser.extract_text_from_evidences(evidence_docs_paths)
-        # 3. llm_analyzer.analyze_infringement(...)
-        # 4. report_generator.create_report(...)
-        # Each step would update analysis_status_db[report_base_name]
+            analysis_thread = Thread(target=run_full_analysis_pipeline,
+                                     args=(current_app._get_current_object(), # Pass the app instance for context if needed by thread
+                                           patent_doc_path,
+                                           processed_evidence_sources, # List of file paths for local mode
+                                           # current_mode, # Would determine how processed_evidence_sources is interpreted
+                                           report_filepath,
+                                           report_base_name,
+                                           session_id,
+                                           session_upload_dir # For cleanup
+                                           ))
+            analysis_thread.start()
 
-        # For demonstration, let's create a dummy report file after a delay if SIMULATE_LLM is true
-        if settings.SIMULATE_LLM:
-            from threading import Thread
-            # The target function for the thread needs all necessary data
-            thread = Thread(target=simulate_analysis_and_create_report,
-                            args=(patent_doc_path, evidence_docs_paths, report_filename_md, report_base_name, session_id))
-            thread.start()
-        else:
-            # TODO: Implement actual analysis call here
-            # For now, if not simulating, it will likely show "processing" indefinitely or fail at check_status
-            analysis_status_db[report_base_name]["error"] = "Actual LLM analysis not implemented yet. Set SIMULATE_LLM=True in settings.py for a demo."
-            analysis_status_db[report_base_name]["status"] = "failed"
+            # Simplified estimated time for now
+            estimated_time_seconds = 120 + len(processed_evidence_sources) * 30
+            if config['SIMULATE_LLM']:
+                estimated_time_seconds = config['SIMULATE_LLM_DELAY'] * (2 + len(processed_evidence_sources) if processed_evidence_sources else 2)
 
+            return redirect(url_for('analyzing_page', report_filename=report_base_name, estimated_time=estimated_time_seconds))
+        return redirect(url_for('index')) # Should not happen if POST
 
-        estimated_time_seconds = 60 + len(evidence_docs_paths) * 15 # Rough estimate
-        if settings.SIMULATE_LLM:
-             estimated_time_seconds = settings.SIMULATE_LLM_DELAY * (2 + len(evidence_docs_paths))
+    # --- Analysis Pipeline (to be run in a thread) ---
+    # This function needs access to the app's module instances.
+    # It will be defined within create_app or receive them as arguments.
+    def run_full_analysis_pipeline(app_instance, # Pass Flask app instance
+                                   patent_doc_path_local,
+                                   evidence_sources_local, # List of file paths for local mode
+                                   # analysis_mode, # 'local' or 'online_search'
+                                   output_report_filepath,
+                                   report_base_name_key,
+                                   session_id_local,
+                                   session_upload_dir_local
+                                   ):
+        # Since this runs in a separate thread, use the passed app_instance to access modules
+        # and app.config if necessary (though modules mostly load their own configs).
+        # For modules attached to app_instance (e.g., app_instance.patent_parser):
+        patent_parser_instance = app_instance.patent_parser
+        clue_acquirer_instance = app_instance.clue_acquirer
+        evidence_matcher_instance = app_instance.evidence_matcher
+        reliability_assessor_instance = app_instance.reliability_assessor
+        report_generator_instance = app_instance.report_generator
 
-
-        return redirect(url_for('analyzing_page', report_filename=report_base_name, estimated_time=estimated_time_seconds))
-
-@app.route('/analyzing/<report_filename>')
-def analyzing_page(report_filename):
-    # The estimated time could be passed as a query parameter or retrieved based on report_filename if stored
-    estimated_time = request.args.get('estimated_time', 180) # Default to 180 seconds
-    return render_template('analyzing.html', report_filename=report_filename, estimated_time=estimated_time)
-
-@app.route('/status/<report_filename>')
-def check_analysis_status(report_filename):
-    status_info = analysis_status_db.get(report_filename, {"status": "unknown", "error": "Analysis ID not found."})
-    return jsonify(status_info)
-
-@app.route('/report/<report_filename>')
-def view_report(report_filename):
-    report_path_md = os.path.join(settings.REPORTS_FOLDER, secure_filename(report_filename))
-    try:
-        with open(report_path_md, 'r', encoding='utf-8') as f:
-            report_content_md = f.read()
-        # Simple title extraction (e.g., first line of MD if it's a heading)
-        report_title = report_content_md.split('\n')[0].replace('#', '').strip() or "分析报告"
-        return render_template('report.html',
-                               report_content_md=report_content_md,
-                               report_title=report_title,
-                               report_filename_raw=report_filename) # Pass raw filename for download links
-    except FileNotFoundError:
-        return render_template('report.html', error_message=f"报告文件 {report_filename} 未找到或尚未生成。请稍后再试或返回主页重新开始。", report_filename_raw=report_filename)
-    except Exception as e:
-        return render_template('report.html', error_message=f"读取报告时出错: {e}", report_filename_raw=report_filename)
-
-@app.route('/download_report/<report_filename>')
-def download_report(report_filename):
-    report_path = os.path.join(settings.REPORTS_FOLDER, secure_filename(report_filename))
-    as_attachment = request.args.get('as_attachment', True) # Default to download
-    format_type = request.args.get('format', 'md').lower()
-
-    if not os.path.exists(report_path):
-        flash("请求的报告文件不存在。", "danger")
-        return redirect(url_for('index')) # Or some error page
-
-    if format_type == 'pdf':
-        # Placeholder for PDF conversion. This requires a library like WeasyPrint or reportlab
-        # For now, we'll just indicate it's not implemented.
         try:
-            from weasyprint import HTML
-            # Read markdown, convert to HTML (basic) then to PDF
-            with open(report_path, 'r', encoding='utf-8') as f_md:
-                md_content = f_md.read()
+            analysis_status_db[report_base_name_key]["current_step"] = "patent_parsing"
+            analysis_status_db[report_base_name_key]["progress_message"] = "正在解析专利文件..."
 
-            # Basic HTML wrapper for the markdown content for better PDF rendering
-            # You might need a more sophisticated MD -> HTML for WeasyPrint if complex structures are involved
-            import markdown
-            html_content = markdown.markdown(md_content, extensions=['tables', 'fenced_code'])
+            raw_patent_text = patent_parser_instance.parse_file(patent_doc_path_local)
+            if isinstance(raw_patent_text, str) and raw_patent_text.startswith("[") and raw_patent_text.endswith("]"): # Error from parser
+                raise ValueError(f"专利文件解析失败: {raw_patent_text}")
 
-            html_string = f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
-<style>
-body {{ font-family: sans-serif; line-height: 1.6; }}
-table {{ border-collapse: collapse; width: 100%; margin-bottom: 1em; }}
-th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; }}
-th {{ background-color: #f2f2f2; }}
-pre {{ background-color: #f8f8f8; padding: 10px; border: 1px solid #ddd; overflow-x: auto; }}
-code {{ font-family: monospace; }}
-h1, h2, h3 {{ border-bottom: 1px solid #eee; padding-bottom: 0.3em; }}
-</style></head><body>{html_content}</body></html>"""
+            analysis_status_db[report_base_name_key]["current_step"] = "patent_summarization"
+            analysis_status_db[report_base_name_key]["progress_message"] = "正在提取专利核心信息 (LLM)..."
+            patent_summary_data = evidence_matcher_instance.summarize_patent_with_llm(raw_patent_text)
+            if patent_summary_data.get("error"):
+                raise ValueError(f"专利摘要提取失败 (LLM): {patent_summary_data.get('details', patent_summary_data['error'])}")
 
-            pdf_filename = os.path.splitext(report_filename)[0] + ".pdf"
-            # pdf_path = os.path.join(settings.REPORTS_FOLDER, pdf_filename) # Save it then send? Or send directly.
+            analysis_status_db[report_base_name_key]["current_step"] = "clue_acquisition"
+            analysis_status_db[report_base_name_key]["progress_message"] = "正在获取和解析侵权线索..."
 
-            # html = HTML(string=html_content, base_url=settings.REPORTS_FOLDER) # base_url if you have local images/css
-            html = HTML(string=html_string)
-            pdf_bytes = html.write_pdf()
+            # --- TODO: Adapt clue acquisition based on analysis_mode ---
+            # if analysis_mode == "local":
+            # For now, assuming evidence_sources_local is a list of file paths for local mode
+            acquired_clues = clue_acquirer_instance.acquire_clues(local_sources=evidence_sources_local)
+            # elif analysis_mode == "online_search":
+            #     acquired_clues = clue_acquirer_instance.acquire_clues(search_params=evidence_sources_local) # evidence_sources would be a dict
+            # else:
+            #     raise ValueError(f"Unsupported analysis mode: {analysis_mode}")
 
-            from io import BytesIO
-            return send_from_directory(
-                directory=BytesIO(pdf_bytes), # This is not how send_from_directory works.
-                path=pdf_filename, # This also incorrect.
-                # Instead, use send_file
-                mimetype='application/pdf',
-                as_attachment=True,
-                download_name=pdf_filename # Flask 2.0+ uses download_name
+            valid_clues = [clue for clue in acquired_clues if not clue.get("error") and clue.get("parsed_text")]
+            if not valid_clues and acquired_clues: # Some clues acquired but all had errors or no text
+                 print(f"WARN: Pipeline: No valid clues with parsed text obtained from {len(acquired_clues)} sources.")
+                 # Decide if this is a fatal error or if we can proceed to report generation with no evidence.
+                 # For now, let's allow it to proceed and generate a report indicating no evidence was successfully analyzed.
+
+
+            analysis_status_db[report_base_name_key]["current_step"] = "evidence_matching"
+            analysis_status_db[report_base_name_key]["progress_message"] = f"准备匹配 {len(valid_clues)} 条有效线索..."
+
+            all_evidence_analyses_results = []
+            for i, clue in enumerate(valid_clues):
+                analysis_status_db[report_base_name_key]["progress_message"] = f"正在匹配线索 {i+1}/{len(valid_clues)}: {clue.get('source_identifier', '未知线索')}..."
+                match_result = evidence_matcher_instance.match_evidence(
+                    patent_summary_data,
+                    clue.get("parsed_text"),
+                    clue.get("source_identifier")
+                )
+                if match_result.get("error"):
+                    print(f"ERROR: Pipeline: Failed to match clue {clue.get('source_identifier')}: {match_result.get('details', match_result['error'])}")
+                    # Add error info to results, or skip? For now, include it.
+                    match_result['clue_identifier'] = clue.get('source_identifier', 'ErrorClue')
+                    all_evidence_analyses_results.append(match_result) # Append error result
+                    continue # Skip reliability for this one
+
+                if reliability_assessor_instance.enabled:
+                    analysis_status_db[report_base_name_key]["progress_message"] = f"评估线索 {i+1} 的分析可靠性..."
+                    match_result_with_reliability = reliability_assessor_instance.assess_reliability(match_result)
+                    all_evidence_analyses_results.append(match_result_with_reliability)
+                else:
+                    # Ensure 'reliability_assessment' key exists with disabled status if not run
+                    match_result['reliability_assessment'] = {'status': 'disabled', 'message': '评估模块未启用'}
+                    all_evidence_analyses_results.append(match_result)
+
+            analysis_status_db[report_base_name_key]["current_step"] = "report_generation"
+            analysis_status_db[report_base_name_key]["progress_message"] = "正在生成分析报告..."
+
+            report_metadata_info = {
+                "task_id": session_id_local,
+                "generation_time": time.strftime("%Y-%m-%d %H:%M:%S")
+            }
+            final_report_md = report_generator_instance.generate_report(
+                patent_summary_data,
+                all_evidence_analyses_results,
+                report_metadata_info
             )
 
+            with open(output_report_filepath, 'w', encoding='utf-8') as f:
+                f.write(final_report_md)
 
-        except ImportError:
-            flash("PDF转换库 (WeasyPrint) 未安装。无法下载PDF版本。", "warning")
-            return redirect(url_for('view_report', report_filename=report_filename))
+            analysis_status_db[report_base_name_key]["status"] = "completed"
+            analysis_status_db[report_base_name_key]["progress_message"] = "分析报告已生成！"
+
         except Exception as e:
-            flash(f"生成PDF报告时出错: {e}", "danger")
-            # return redirect(url_for('view_report', report_filename=report_filename))
-            # For debugging, let's see the error on the page
-            return f"Error generating PDF: {e}", 500
+            print(f"ERROR: Pipeline: Analysis pipeline failed for report {report_base_name_key}: {e}")
+            import traceback
+            traceback.print_exc() # Print full traceback for debugging
+            analysis_status_db[report_base_name_key]["status"] = "failed"
+            analysis_status_db[report_base_name_key]["error"] = f"分析流程出错: {str(e)}"
+            # Optionally, write a simple error report
+            try:
+                with open(output_report_filepath, 'w', encoding='utf-8') as f:
+                    f.write(f"# 分析失败\n\n任务ID: {session_id_local}\n错误详情: {str(e)}\n\n请检查日志获取更多信息。")
+            except Exception as report_err:
+                print(f"ERROR: Pipeline: Failed to write error report: {report_err}")
+        finally:
+            if os.path.exists(session_upload_dir_local):
+                shutil.rmtree(session_upload_dir_local, ignore_errors=True)
+                print(f"INFO: Pipeline: Cleaned up session directory: {session_upload_dir_local}")
 
 
-    elif format_type == 'html':
-        # Placeholder for HTML conversion or direct serving if MD is simple
-        flash("HTML下载格式暂未完全实现。", "info")
-        return redirect(url_for('view_report', report_filename=report_filename))
-        # return send_from_directory(settings.REPORTS_FOLDER, report_filename, as_attachment=True, mimetype='text/html')
+    @app.route('/analyzing/<report_filename>')
+    def analyzing_page(report_filename):
+        estimated_time = request.args.get('estimated_time', 180)
+        return render_template('analyzing.html', report_filename=report_filename, estimated_time=estimated_time)
 
-    # Default to MD
-    return send_from_directory(settings.REPORTS_FOLDER, report_filename, as_attachment=as_attachment)
+    @app.route('/status/<report_filename>')
+    def check_analysis_status(report_filename):
+        status_info = analysis_status_db.get(report_filename, {"status": "unknown", "error": "Analysis ID not found."})
+        return jsonify(status_info)
+
+    @app.route('/report/<report_filename>')
+    def view_report(report_filename):
+        # Use current_app.config here
+        report_path_md = os.path.join(current_app.config['REPORTS_FOLDER'], secure_filename(report_filename))
+        try:
+            with open(report_path_md, 'r', encoding='utf-8') as f:
+                report_content_md = f.read()
+            report_title = report_content_md.split('\n')[0].replace('#', '').strip() or "分析报告"
+            return render_template('report.html',
+                                   report_content_md=report_content_md,
+                                   report_title=report_title,
+                                   report_filename_raw=report_filename)
+        except FileNotFoundError:
+            return render_template('report.html', error_message=f"报告文件 {report_filename} 未找到或尚未生成。", report_filename_raw=report_filename)
+        except Exception as e:
+            return render_template('report.html', error_message=f"读取报告时出错: {e}", report_filename_raw=report_filename)
+
+    @app.route('/download_report/<report_filename>')
+    def download_report(report_filename):
+        # Use current_app.config here
+        reports_folder = current_app.config['REPORTS_FOLDER']
+        report_path = os.path.join(reports_folder, secure_filename(report_filename))
+        as_attachment = request.args.get('as_attachment', 'true').lower() == 'true' # Ensure boolean
+        format_type = request.args.get('format', 'md').lower()
+
+        if not os.path.exists(report_path):
+            flash("请求的报告文件不存在。", "danger")
+            return redirect(url_for('index'))
+
+        if format_type == 'pdf':
+            try:
+                from weasyprint import HTML
+                with open(report_path, 'r', encoding='utf-8') as f_md:
+                    md_content = f_md.read()
+
+                html_content_for_pdf = md.markdown(md_content, extensions=['tables', 'fenced_code'])
+                # Using a more complete HTML structure for WeasyPrint
+                html_string = f"""<!DOCTYPE html><html><head><meta charset="UTF-8">
+    <style>
+    body {{ font-family: sans-serif; line-height: 1.6; margin: 20px; }}
+    table {{ border-collapse: collapse; width: 100%; margin-bottom: 1em; page-break-inside: auto; }}
+    tr {{ page-break-inside: avoid; page-break-after: auto; }}
+    th, td {{ border: 1px solid #ddd; padding: 8px; text-align: left; word-wrap: break-word; }}
+    th {{ background-color: #f2f2f2; }}
+    pre {{ background-color: #f8f8f8; padding: 10px; border: 1px solid #ddd; overflow-x: auto; white-space: pre-wrap; word-wrap: break-word; }}
+    code {{ font-family: monospace; }}
+    h1, h2, h3, h4, h5, h6 {{ page-break-after: avoid; }}
+    </style></head><body>{html_content_for_pdf}</body></html>"""
+
+                pdf_filename_dl = os.path.splitext(report_filename)[0] + ".pdf"
+
+                # It's better to use BytesIO with send_file for dynamically generated files
+                from io import BytesIO
+                pdf_bytes_io = BytesIO()
+                HTML(string=html_string, base_url=reports_folder).write_pdf(pdf_bytes_io)
+                pdf_bytes_io.seek(0)
+
+                return send_file(
+                    pdf_bytes_io,
+                    mimetype='application/pdf',
+                    as_attachment=True,
+                    download_name=pdf_filename_dl # Flask 2.0+ uses download_name
+                )
+            except ImportError:
+                flash("PDF转换库 (WeasyPrint) 未安装。无法下载PDF版本。", "warning")
+                return redirect(url_for('view_report', report_filename=report_filename))
+            except Exception as e:
+                flash(f"生成PDF报告时出错: {e}", "danger")
+                print(f"ERROR: PDF Generation: {e}") # Log error
+                import traceback
+                traceback.print_exc()
+                return redirect(url_for('view_report', report_filename=report_filename)) # Redirect to MD view on error
+                # return f"Error generating PDF: {e}", 500 # For debugging
+
+        elif format_type == 'html':
+            # For HTML download, could convert MD to HTML and serve it, or just serve MD as text/html
+            # For a "downloadable" HTML, it's often better to render the MD into a full HTML page
+            flash("HTML直接下载格式暂未完全实现，将提供Markdown源文件。", "info")
+            # Fall through to MD download with a different mimetype if desired, or just serve MD
+            return send_from_directory(reports_folder, report_filename, as_attachment=True, mimetype='text/markdown')
 
 
-# --- Helper for Simulation ---
-def simulate_analysis_and_create_report(patent_doc_path, evidence_docs_paths, report_md_path, report_base_name, session_id):
-    """
-    Simulates the analysis process and creates a dummy report.
-    Updates status_db.
-    """
-    try:
-        analysis_status_db[report_base_name] = {"status": "processing", "current_step": "patent_extraction", "progress_message": "提取核心专利信息..."}
-        time.sleep(settings.SIMULATE_LLM_DELAY / 2) # Simulate patent processing
+        # Default to MD
+        return send_from_directory(reports_folder, report_filename, as_attachment=as_attachment)
 
-        patent_text_summary = f"这是对专利文件 {os.path.basename(patent_doc_path)} 的模拟摘要。\n主要权利要求：1. 一种新的组合物... 2. 一种制备方法..."
-        if patent_doc_path.endswith(".url"): # if it was a URL
-             patent_text_summary = f"这是对专利URL内容的模拟摘要。\n主要权利要求：1. 一种新的小工具... "
+    # --- Helper for Simulation (to be removed or refactored if SIMULATE_LLM is False for pipeline) ---
+    # This function is now largely replaced by run_full_analysis_pipeline
+    # If SIMULATE_LLM is True, run_full_analysis_pipeline will use the simulation features
+    # within each module. So, this specific simulate_analysis_and_create_report can be removed.
+    # For now, I will comment it out. It will be removed in a subsequent step.
+
+    # def simulate_analysis_and_create_report(patent_doc_path, evidence_docs_paths, report_md_path, report_base_name, session_id):
+    #     """
+    #     Simulates the analysis process and creates a dummy report.
+    #     Updates status_db.
+    #     """
+    #     # ... (Implementation commented out as it's being replaced)
 
 
-        analysis_status_db[report_base_name]["current_step"] = "evidence_extraction"
-        analysis_status_db[report_base_name]["progress_message"] = f"解析 {len(evidence_docs_paths)} 个侵权线索文件..."
-        time.sleep(settings.SIMULATE_LLM_DELAY / 2) # Simulate evidence processing initiation
-
-        evidence_summaries = []
-        for i, doc_path in enumerate(evidence_docs_paths):
-            analysis_status_db[report_base_name]["progress_message"] = f"解析侵权线索文件 {i+1}/{len(evidence_docs_paths)}: {os.path.basename(doc_path)}..."
-            time.sleep(settings.SIMULATE_LLM_DELAY / (len(evidence_docs_paths) if len(evidence_docs_paths) > 0 else 1) )
-            evidence_summaries.append(f"线索文件 {os.path.basename(doc_path)}：\n  - 模拟提取内容：包含与专利相关的关键词A、B、C。")
-
-        analysis_status_db[report_base_name]["current_step"] = "llm_analysis"
-        analysis_status_db[report_base_name]["progress_message"] = "大模型正在进行侵权比对分析..."
-        time.sleep(settings.SIMULATE_LLM_DELAY) # Simulate LLM analysis
-
-        # Create dummy report content
-        report_content = f"# 专利侵权分析报告 (模拟)\n\n"
-        report_content += f"分析时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
-        report_content += f"任务ID: {session_id}\n\n"
-        report_content += f"## 1. 核心专利信息\n\n"
-        report_content += f"来源：`{os.path.basename(patent_doc_path)}`\n\n"
-        report_content += f"**模拟专利摘要与核心权利要求**:\n{patent_text_summary}\n\n"
-        report_content += f"## 2. 侵权线索分析\n\n"
-
-        if not evidence_docs_paths:
-            report_content += "未提供侵权线索文件进行分析。\n"
-        else:
-            report_content += f"本次分析共包含 {len(evidence_docs_paths)} 个潜在侵权线索文件。\n\n"
-            for i, summary in enumerate(evidence_summaries):
-                risk = ["高风险", "中风险", "低风险"][i % 3]
-                score = [75, 55, 30][i % 3]
-                report_content += f"### 线索 {i+1}: {os.path.basename(evidence_docs_paths[i])}\n"
-                report_content += f"- **内容摘要**：{summary}\n"
-                report_content += f"- **模拟匹配度得分**：{score}/100\n"
-                report_content += f"- **模拟风险等级**：{risk}\n"
-                report_content += f"- **模拟分析**：该线索文件中的特征 X、Y 与专利权利要求 Z 存在较高相似性。建议进一步详细审查。\n\n"
-
-        report_content += f"## 3. 总结与建议 (模拟)\n\n"
-        report_content += "- 基于模拟分析，部分线索显示出较高的侵权风险。\n"
-        report_content += "- 建议法务团队对高风险线索进行深入的人工复核和证据固定。\n"
-        report_content += "---\n*此报告由PMAS系统自动生成（模拟模式）*\n"
-
-        with open(report_md_path, 'w', encoding='utf-8') as f:
-            f.write(report_content)
-
-        analysis_status_db[report_base_name]["status"] = "completed"
-        analysis_status_db[report_base_name]["current_step"] = "report_generation"
-        analysis_status_db[report_base_name]["progress_message"] = "报告生成完毕"
-
-    except Exception as e:
-        analysis_status_db[report_base_name]["status"] = "failed"
-        analysis_status_db[report_base_name]["error"] = f"模拟分析过程中发生错误: {str(e)}"
-        # Optionally, write an error report
-        error_report_content = f"# 分析失败\n\n错误详情: {str(e)}"
-        with open(report_md_path, 'w', encoding='utf-8') as f: # Overwrite with error or use different name
-            f.write(error_report_content)
-    finally:
-        # Clean up session-specific uploaded files after analysis is done (or failed)
-        # In a real scenario, you might want to keep them for a while or based on policy
-        session_upload_dir_to_clean = os.path.join(SESSION_UPLOADS_PARENT, session_id)
-        if os.path.exists(session_upload_dir_to_clean):
-             shutil.rmtree(session_upload_dir_to_clean, ignore_errors=True)
-
+    return app # Return the app instance from the factory
 
 if __name__ == '__main__':
+    app = create_app() # Create app instance using factory
     # Check for WeasyPrint for PDF export (optional, for user info)
     try:
         import weasyprint
@@ -427,4 +491,4 @@ if __name__ == '__main__':
     except ImportError:
         print("WeasyPrint not found. PDF export will not be available. To enable, run: pip install weasyprint")
 
-    app.run(debug=True, host='0.0.0.0', port=5001) # Running on a different port for clarity
+    app.run(debug=True, host='0.0.0.0', port=5001)
