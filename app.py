@@ -1,27 +1,21 @@
 import os
+import json
 from flask import Flask, render_template, request, redirect, url_for, flash, current_app
-import markdown as md
 from modules.perf_analyzer.analyzer import PerfAnalyzer
 
 def create_app():
     app = Flask(__name__)
 
-    # Load configuration
+    # General app configuration
     app.config['UPLOAD_FOLDER'] = os.path.join(os.getcwd(), 'uploads')
-    app.config['OPENAI_API_KEY'] = os.getenv('OPENAI_API_KEY', 'YOUR_FALLBACK_OPENAI_KEY')
     app.secret_key = os.urandom(24)
-
     os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 
     # --- Perf Analyzer Setup ---
+    # The PerfAnalyzer is now configured via core.config, so we don't pass keys here.
     perf_output_dir = os.path.join(app.config['UPLOAD_FOLDER'], 'perf_reports')
-    os.makedirs(perf_output_dir, exist_ok=True)
+    app.perf_analyzer = PerfAnalyzer(output_dir=perf_output_dir)
 
-    # Instantiate the PerfAnalyzer and attach it to the app
-    app.perf_analyzer = PerfAnalyzer(
-        output_dir=perf_output_dir,
-        openai_api_key=app.config.get('OPENAI_API_KEY')
-    )
 
     @app.route('/')
     def index():
@@ -63,7 +57,13 @@ def create_app():
 
         # 3. Analyze with LLM
         folded_stacks_file = os.path.join(perf_analyzer.output_dir, 'out.perf-folded')
-        llm_analysis = perf_analyzer.analyze_with_llm(folded_stacks_file)
+        llm_analysis_json = perf_analyzer.analyze_with_llm(folded_stacks_file)
+
+        # Handle potential errors from the LLM analysis
+        if 'error' in llm_analysis_json:
+            flash(f"AI analysis failed: {llm_analysis_json['error']}", "danger")
+            # Proceed without AI analysis if it fails
+            llm_analysis_json = {}
 
         try:
             with open(flamegraph_svg_path, 'r') as f:
@@ -72,14 +72,12 @@ def create_app():
             flash(f"Could not read flame graph file: {e}", "danger")
             flamegraph_svg_content = "<p>Error loading flame graph.</p>"
 
-        # Convert markdown analysis to HTML
-        llm_analysis_html = md.markdown(llm_analysis, extensions=['tables', 'fenced_code'])
-
+        # Pass the raw JSON to the template for the frontend to handle
         return render_template(
             'perf_report.html',
             command=command_to_run,
             flamegraph_svg=flamegraph_svg_content,
-            llm_analysis_html=llm_analysis_html
+            llm_analysis_json=json.dumps(llm_analysis_json) # Convert dict to JSON string
         )
 
     return app

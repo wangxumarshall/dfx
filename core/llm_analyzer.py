@@ -1,117 +1,142 @@
-# core/llm_analyzer.py
 import time
-# import openai # Or your chosen LLM library like `deepseek`
-from config import settings
-from prompts import prompt_templates
+import openai
+import json
+from .config import settings
+from . import prompts
 
-# --- LLM Client Initialization ---
-# This is where you'd set up your API key and client.
-# For OpenAI:
-# if settings.OPENAI_API_KEY and not settings.OPENAI_API_KEY.startswith("sk-YOUR_"):
-# openai.api_key = settings.OPENAI_API_KEY
-# if hasattr(settings, 'LLM_BASE_URL') and settings.LLM_BASE_URL:
-# openai.api_base = settings.LLM_BASE_URL # For self-hosted or proxies like LiteLLM, DeepSeek
-# else:
-# print("Warning: OPENAI_API_KEY not configured in settings.py or is a placeholder. LLM calls will fail.")
-# pass # Or raise an error
+# Global LLM client
+llm_client = None
 
-# For DeepSeek (example, assuming a similar client library structure)
-# if settings.OPENAI_API_KEY and "deepseek" in settings.LLM_MODEL_NAME.lower(): # Example check
-#     try:
-#         import deepseek
-#         # deepseek.api_key = settings.OPENAI_API_KEY # Or specific DeepSeek key
-#         # if hasattr(settings, 'LLM_BASE_URL') and settings.LLM_BASE_URL:
-#         #     deepseek.api_base = settings.LLM_BASE_URL
-#         print("DeepSeek client would be configured here.")
-#     except ImportError:
-#         print("Error: DeepSeek library not found. Please install it if you intend to use DeepSeek models.")
+def get_llm_client():
+    """
+    Initializes and returns a thread-safe LLM client based on the provider.
+    """
+    global llm_client
+    if llm_client:
+        return llm_client
+
+    provider = settings.LLM_PROVIDER
+
+    if provider == "openai":
+        llm_client = openai.OpenAI(
+            api_key=settings.OPENAI_API_KEY,
+            base_url=settings.LLM_BASE_URL
+        )
+    elif provider == "deepseek":
+        try:
+            from deepseek import DeepSeek  # Assuming a library name
+            llm_client = DeepSeek(
+                api_key=settings.DEEPSEEK_API_KEY,
+                base_url=settings.LLM_BASE_URL
+            )
+        except ImportError:
+            raise ImportError("DeepSeek library not found. Please install it via `pip install deepseek`.")
+    elif provider == "ollama":
+        # For Ollama, the client doesn't need an API key by default
+        # The base_url is typically http://localhost:11434
+        llm_client = openai.OpenAI(
+            base_url=settings.LLM_BASE_URL or "http://localhost:11434/v1",
+            api_key="ollama" # Required by the library, but not used by Ollama
+        )
+    elif provider == "none":
+        llm_client = None
+    else:
+        raise ValueError(f"Unsupported LLM provider: {provider}")
+
+    return llm_client
 
 
-def get_llm_response(prompt, model_name=None, max_tokens=1500, temperature=0.2):
+def get_llm_response(prompt, system_prompt=None, model_name=None, max_tokens=None, temperature=None, json_mode=False):
     """
     Generic function to get a response from the configured LLM.
-    This will need to be adapted based on the specific LLM client library used (OpenAI, DeepSeek, etc.).
+    Handles different providers and simulation mode.
     """
     if settings.SIMULATE_LLM:
-        print(f"\n--- SIMULATING LLM CALL ---")
-        print(f"Model: {model_name or settings.LLM_MODEL_NAME}")
-        print(f"Prompt (first 200 chars):\n{prompt[:200]}...\n")
-        time.sleep(settings.SIMULATE_LLM_DELAY / 2) # Simulate network latency & processing
+        return _simulate_llm_call(prompt, json_mode)
 
-        # Simple simulation based on prompt type (very basic)
-        if "PATENT_SUMMARY_PROMPT" in prompt_templates.__dict__.values(): # Check if it's a known prompt structure
-             if prompt.startswith(prompt_templates.PATENT_SUMMARY_PROMPT.splitlines()[1][:50]): # Fragile check
-                return """**专利名称**：模拟高效能源转换装置
-**技术领域**：新能源
-**核心权利要求**：
-1. 一种包含A、B、C部件的能源转换装置，其特征在于...
-2. 根据权利要求1所述的装置，其中C部件由特殊材料D制成...
-**主要技术特点/创新点**：
-- 采用了新型材料D，提升了转换效率20%。
-- 独特的结构设计，减少了能量损失。"""
+    client = get_llm_client()
+    if not client:
+        return "[LLM_ERROR: LLM provider is set to 'none' or not configured.]"
 
-        if "INFRINGEMENT_ANALYSIS_PROMPT" in prompt_templates.__dict__.values():
-            if prompt.startswith(prompt_templates.INFRINGEMENT_ANALYSIS_PROMPT.splitlines()[1][:50]):
-                return """分析报告：
-1.  **技术特征对比**：
-    *   目标产品在特征A、B上与专利权利要求1一致。特征C略有不同，但功能相似。
-2.  **侵权可能性评估**：
-    *   **字面侵权可能性**：中。大部分特征匹配。
-    *   **等同侵权可能性**：高。特征C的差异可能构成等同。
-3.  **初步匹配度得分**：80/100。基于特征的广泛重叠。
-4.  **抗辩理由初步考虑**: 暂无明显抗辩理由。
-5.  **结论与建议**：高风险。建议进行详细法律评估。"""
+    model = model_name or settings.LLM_MODEL_NAME
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
 
-        if "FINAL_REPORT_GENERATION_PROMPT" in prompt_templates.__dict__.values():
-             if prompt.startswith(prompt_templates.FINAL_REPORT_GENERATION_PROMPT.splitlines()[1][:50]):
-                return """生成的报告：
-# 综合侵权分析报告 (模拟LLM)
+    request_params = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_tokens or settings.LLM_MAX_TOKENS,
+        "temperature": temperature if temperature is not None else settings.LLM_TEMPERATURE,
+    }
 
-## 1. 引言
-本报告旨在分析“模拟高效能源转换装置”专利的潜在侵权风险。
+    if json_mode and settings.LLM_PROVIDER in ["openai", "ollama"]:
+        request_params["response_format"] = {"type": "json_object"}
 
-## 2. 核心专利概述
-**专利名称**：模拟高效能源转换装置
-... (details from patent summary)
-
-## 3. 侵权线索评估汇总
-| 线索名称 | 匹配度 | 风险等级 | 关键理由 |
-|----------|--------|----------|----------|
-| product_X.pdf | 80/100 | 高风险   | 技术特征高度重叠 |
-| competitor_Y.html | 60/100 | 中风险 | 部分特征相似，需进一步分析 |
-
-...(further sections as per prompt)...
-"""
-        return "这是来自模拟LLM的通用响应。请检查您的提示和模拟逻辑。"
-
-
-    # --- Actual LLM API Call (Example for OpenAI compatible APIs) ---
-    # This part needs to be robust and handle API errors, rate limits, etc.
     try:
-        # Placeholder for actual API call logic
-        # For OpenAI / compatible:
-        # messages = [{"role": "user", "content": prompt}]
-        # response = openai.ChatCompletion.create(
-        #     model=model_name or settings.LLM_MODEL_NAME,
-        #     messages=messages,
-        #     max_tokens=max_tokens,
-        #     temperature=temperature,
-        #     # top_p=1, # Adjust other parameters as needed
-        #     # frequency_penalty=0,
-        #     # presence_penalty=0
-        # )
-        # return response.choices[0].message.content.strip()
+        print(f"Attempting LLM call to model: {model} (JSON Mode: {json_mode})")
+        response = client.chat.completions.create(**request_params)
+        content = response.choices[0].message.content.strip()
 
-        # Replace with your specific LLM client call:
-        print(f"Attempting REAL LLM call to model: {model_name or settings.LLM_MODEL_NAME}")
-        print("ERROR: Real LLM call logic is not fully implemented in `core/llm_analyzer.py`.")
-        print("Please implement the API call for your chosen LLM provider.")
-        raise NotImplementedError("LLM API call logic needs to be implemented for the chosen provider.")
+        if json_mode:
+            # The 'json_object' mode should guarantee valid JSON, but we parse it here
+            # to return a Python dict, which is more useful for the caller.
+            try:
+                return json.loads(content)
+            except json.JSONDecodeError:
+                print(f"LLM API call failed: Model did not return valid JSON despite json_mode. Content:\n{content}")
+                return f"[LLM_ERROR: Failed to parse JSON response from model.]"
 
-    except Exception as e: # Catch specific API errors if possible
+        return content
+
+    except Exception as e:
         print(f"LLM API call failed: {e}")
-        # Fallback, retry, or raise
         return f"[LLM_ERROR: {e}]"
+
+
+def _simulate_llm_call(prompt, json_mode=False):
+    """Handles the simulation logic for LLM calls."""
+    print(f"\n--- SIMULATING LLM CALL (JSON Mode: {json_mode}) ---")
+    print(f"Model: {settings.LLM_MODEL_NAME}")
+    print(f"Prompt (first 200 chars):\n{prompt[:200]}...\n")
+    time.sleep(settings.SIMULATE_LLM_DELAY)
+
+    # Performance analysis simulation
+    if "identify performance bottlenecks" in prompt:
+        if json_mode:
+            return {
+                "identified_bottlenecks": [
+                    {
+                        "function_stack": "main;read_file;process_data",
+                        "percentage": 45.5,
+                        "analysis": "This function is responsible for nearly half of the execution time. The `process_data` part seems to be computationally intensive.",
+                        "optimization_suggestion": "Consider optimizing the `process_data` function. Possible improvements include using more efficient algorithms or parallelizing the workload."
+                    },
+                    {
+                        "function_stack": "main;write_output;format_json",
+                        "percentage": 22.1,
+                        "analysis": "Significant time is spent formatting and writing the output file. This could be due to large data volumes or inefficient serialization.",
+                        "optimization_suggestion": "Use a faster JSON library like orjson. If possible, stream the output instead of buffering it all in memory."
+                    }
+                ],
+                "overall_summary": "The application is I/O bound, with major bottlenecks in data processing and output generation. Focusing on these two areas should yield significant performance improvements."
+            }
+        else:
+            return """
+### AI-Powered Analysis (Simulated)
+
+**Top Bottleneck: `main;read_file;process_data` (45.5% of samples)**
+*   **Analysis:** This function is responsible for nearly half of the execution time. The `process_data` part seems to be computationally intensive.
+*   **Suggestion:** Consider optimizing the `process_data` function. Possible improvements include using more efficient algorithms or parallelizing the workload.
+
+**Second Bottleneck: `main;write_output;format_json` (22.1% of samples)**
+*   **Analysis:** Significant time is spent formatting and writing the output file. This could be due to large data volumes or inefficient serialization.
+*   **Suggestion:** Use a faster JSON library like `orjson`. If possible, stream the output instead of buffering it all in memory.
+"""
+
+    # Fallback for other prompts
+    return "This is a simulated LLM response."
 
 
 def analyze_patent_text(patent_full_text):
