@@ -1,9 +1,10 @@
 import subprocess
 import os
-import openai
+from core import llm_analyzer
+from core import prompts
 
 class PerfAnalyzer:
-    def __init__(self, output_dir='perf_data', openai_api_key=None):
+    def __init__(self, output_dir='perf_data'):
         self.output_dir = output_dir
         if not os.path.exists(self.output_dir):
             os.makedirs(self.output_dir)
@@ -11,18 +12,8 @@ class PerfAnalyzer:
         # Store the path to the FlameGraph scripts
         self.flamegraph_dir = os.path.expanduser('~/FlameGraph')
 
-        # Configure OpenAI client
-        if openai_api_key:
-            openai.api_key = openai_api_key
-        else:
-            # Attempt to get key from environment variable as a fallback
-            openai.api_key = os.getenv("OPENAI_API_KEY")
-
-        if not openai.api_key:
-            print("Warning: OpenAI API key not provided. AI analysis will be disabled.")
-            self.llm_enabled = False
-        else:
-            self.llm_enabled = True
+        # LLM client is now managed by core.llm_analyzer
+        # No need to manage API keys here.
 
     def collect_data(self, command, duration=10, freq=99):
         """
@@ -147,17 +138,14 @@ class PerfAnalyzer:
     def analyze_with_llm(self, folded_stacks_path):
         """
         Analyzes the folded stack data with an LLM to identify bottlenecks
-        and suggest optimizations.
+        and suggest optimizations, requesting a structured JSON output.
 
         Args:
             folded_stacks_path (str): The path to the folded stacks file.
 
         Returns:
-            str: A markdown-formatted string with the AI's analysis, or an error message.
+            dict: A dictionary containing the AI's analysis, or an error dictionary.
         """
-        if not self.llm_enabled:
-            return "AI analysis is disabled. Please provide an OpenAI API key."
-
         try:
             with open(folded_stacks_path, 'r') as f:
                 # Read a sample of the data to avoid exceeding token limits
@@ -165,55 +153,33 @@ class PerfAnalyzer:
                 folded_data = "".join(f.readlines()[:1000])
 
             if not folded_data:
-                return "Error: The folded stacks file is empty."
+                return {"error": "The folded stacks file is empty."}
 
-            prompt = self._build_llm_prompt(folded_data)
+            # Use the centralized prompt from core.prompts
+            prompt = prompts.PERF_ANALYSIS_JSON_PROMPT.format(data=folded_data)
 
-            print("Sending data to LLM for analysis...")
-            chat_completion = openai.ChatCompletion.create(
-                model="gpt-3.5-turbo", # Or "gpt-4" for higher quality analysis
-                messages=[
-                    {"role": "system", "content": "You are an expert performance engineer. Your task is to analyze the provided `perf` data (in folded stack format) and identify performance bottlenecks. Provide a detailed analysis and actionable optimization suggestions."},
-                    {"role": "user", "content": prompt}
-                ]
+            # Use the new centralized LLM function
+            # Request JSON mode by setting json_mode=True
+            analysis_result = llm_analyzer.get_llm_response(
+                prompt,
+                system_prompt="You are an expert performance engineer. Your task is to analyze the provided `perf` data (in folded stack format) and identify performance bottlenecks. Return your analysis in the specified JSON format.",
+                json_mode=True
             )
 
-            analysis = chat_completion.choices[0].message.content
-            print("LLM analysis received.")
-            return analysis
+            # Handle different types of responses (error string vs. success dict)
+            if isinstance(analysis_result, str) and analysis_result.startswith("[LLM_ERROR"):
+                print(f"LLM analysis failed: {analysis_result}")
+                return {"error": analysis_result}
+
+            if not isinstance(analysis_result, dict):
+                 print(f"LLM analysis returned an unexpected type: {type(analysis_result)}")
+                 return {"error": "LLM did not return a valid JSON object."}
+
+            print("LLM JSON analysis received successfully.")
+            return analysis_result
 
         except FileNotFoundError:
-            return f"Error: Folded stacks file not found at {folded_stacks_path}"
+            return {"error": f"Folded stacks file not found at {folded_stacks_path}"}
         except Exception as e:
             print(f"An error occurred during LLM analysis: {e}")
-            return f"An error occurred while communicating with the AI model: {e}"
-
-    def _build_llm_prompt(self, folded_data):
-        """Builds the prompt for the LLM analysis."""
-
-        prompt = """
-Please analyze the following performance data, which is in the `perf` folded stack format. Each line represents a call stack, and the number at the end is the number of samples for that stack.
-
-**Folded Stack Data:**
-```
-{data}
-```
-
-**Your Task:**
-
-1.  **Identify the Top 3-5 Performance Bottlenecks:**
-    -   Pinpoint the functions or call stacks that consume the most CPU time.
-    -   Look for patterns like deep recursion, inefficient loops, or functions that are unexpectedly hot.
-
-2.  **Provide a Root Cause Analysis for Each Bottleneck:**
-    -   Explain *why* these functions are consuming so much time. Is it due to high call frequency, expensive computations, or something else?
-    -   If possible, infer the likely cause (e.g., "This looks like a classic N+1 query problem," or "The high sample count in `memcpy` suggests large data copies").
-
-3.  **Suggest Actionable Optimization Strategies:**
-    -   Provide specific, concrete recommendations for how to fix each bottleneck.
-    -   Suggestions could include code changes (e.g., "Consider caching the result of `expensive_calculation`"), configuration adjustments, or architectural changes.
-    -   Format your response in clear, easy-to-read Markdown. Use headings, bullet points, and code blocks for clarity.
-
-Begin your analysis now.
-"""
-        return prompt.format(data=folded_data)
+            return {"error": f"An unexpected error occurred during LLM analysis: {e}"}
