@@ -1,0 +1,171 @@
+{% extends "layout.html" %}
+
+{% block title %}Performance Analysis Report{% endblock %}
+
+{% block head %}
+{{ super() }}
+<style>
+    .bottleneck-card {
+        cursor: pointer;
+        transition: transform 0.2s ease-in-out, box-shadow 0.2s ease-in-out;
+    }
+    .bottleneck-card:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    .highlight {
+        background-color: #f0f8ff; /* A light blue highlight */
+        border: 2px solid #007bff;
+        transition: background-color 0.3s;
+    }
+    /* Style for highlighted text in the flame graph */
+    .flamegraph-container svg text {
+        transition: fill 0.3s, font-weight 0.3s;
+    }
+    .flamegraph-container svg text.highlighted-text {
+        fill: #d9534f !important; /* A red color to stand out */
+        font-weight: bold;
+        font-size: 14px !important;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-4">
+    <div class="card mb-4">
+        <div class="card-header">
+            <h3>Performance Analysis for: <code>{{ command }}</code></h3>
+        </div>
+        <div class="card-body">
+            <a href="{{ url_for('perf_index') }}" class="btn btn-secondary">Run New Analysis</a>
+        </div>
+    </div>
+
+    <div class="row">
+        <!-- Flame Graph Column -->
+        <div class="col-lg-8">
+            <div class="card">
+                <div class="card-header">
+                    <h4>Flame Graph</h4>
+                </div>
+                <div class="card-body" style="padding: 0;">
+                    <div id="flamegraph-container" class="flamegraph-container" style="width: 100%; overflow-x: auto;">
+                        {{ flamegraph_svg|safe }}
+                    </div>
+                </div>
+                <div class="card-footer text-muted">
+                    Click on a function in the graph, or click on a bottleneck card to the right to highlight.
+                </div>
+            </div>
+        </div>
+
+        <!-- AI Analysis Column -->
+        <div class="col-lg-4">
+            <div class="card">
+                <div class="card-header">
+                    <h4>AI-Powered Analysis</h4>
+                </div>
+                <div class="card-body">
+                    {% if analysis_data and not analysis_data.error %}
+                        <div class="mb-4">
+                            <h5>Summary</h5>
+                            <p>{{ analysis_data.analysis_summary }}</p>
+                        </div>
+                        <hr>
+                        <h5>Identified Bottlenecks</h5>
+                        {% for bottleneck in analysis_data.bottlenecks %}
+                        <div class="card bottleneck-card mb-3" id="bottleneck-{{ loop.index }}" data-function-name="{{ bottleneck.function }}">
+                            <div class="card-body">
+                                <h6 class="card-title">
+                                    <span class="badge bg-danger me-2">{{ bottleneck.rank }}</span>
+                                    <code>{{ bottleneck.function }}</code>
+                                </h6>
+                                <p class="card-text mb-1"><strong>Est. CPU:</strong> {{ bottleneck.sample_percentage }}</p>
+                                <p class="card-text mb-2"><strong>Root Cause:</strong> {{ bottleneck.root_cause }}</p>
+                                <a class="text-decoration-none" data-bs-toggle="collapse" href="#collapse-{{ loop.index }}" role="button" aria-expanded="false" aria-controls="collapse-{{ loop.index }}">
+                                    Show/Hide Suggestion
+                                </a>
+                                <div class="collapse mt-2" id="collapse-{{ loop.index }}">
+                                    <div class="card card-body bg-light">
+                                        <strong>Suggestion:</strong> {{ bottleneck.optimization_suggestion }}
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    {% else %}
+                        <div class="alert alert-warning" role="alert">
+                            No analysis data available.
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const flamegraphSvg = document.querySelector("#flamegraph-container svg");
+    const bottleneckCards = document.querySelectorAll(".bottleneck-card");
+
+    if (!flamegraphSvg) return;
+
+    // --- Helper Functions ---
+    function clearHighlights() {
+        // Clear card highlights
+        bottleneckCards.forEach(card => card.classList.remove('highlight'));
+
+        // Clear SVG text highlights
+        const highlightedTexts = flamegraphSvg.querySelectorAll('text.highlighted-text');
+        highlightedTexts.forEach(text => text.classList.remove('highlighted-text'));
+    }
+
+    function highlightElements(functionName) {
+        clearHighlights();
+
+        // Highlight matching cards
+        bottleneckCards.forEach(card => {
+            if (card.dataset.functionName === functionName) {
+                card.classList.add('highlight');
+                // Scroll the card into view
+                card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }
+        });
+
+        // Highlight matching text in SVG
+        const allTexts = flamegraphSvg.querySelectorAll('text');
+        allTexts.forEach(text => {
+            if (text.textContent.includes(functionName)) {
+                text.classList.add('highlighted-text');
+            }
+        });
+    }
+
+    // --- Event Listeners ---
+
+    // 1. Clicking on a bottleneck card highlights the function in the SVG
+    bottleneckCards.forEach(card => {
+        card.addEventListener('click', function() {
+            const functionName = this.dataset.functionName;
+            highlightElements(functionName);
+        });
+    });
+
+    // 2. Clicking on a function in the SVG highlights the corresponding card
+    flamegraphSvg.addEventListener('click', function(event) {
+        if (event.target.tagName === 'text') {
+            const functionName = event.target.textContent.trim().split(' (')[0];
+            highlightElements(functionName);
+        } else if (event.target.tagName === 'rect') {
+            // Find the associated text element for the rect
+            const textEl = event.target.nextElementSibling;
+            if (textEl && textEl.tagName === 'text') {
+                 const functionName = textEl.textContent.trim().split(' (')[0];
+                 highlightElements(functionName);
+            }
+        }
+    });
+});
+</script>
+{% endblock %}

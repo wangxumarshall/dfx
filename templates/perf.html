@@ -1,0 +1,51 @@
+{% extends "layout.html" %}
+
+{% block title %}AI Perf Analyzer{% endblock %}
+
+{% block content %}
+<div class="container mt-5">
+    <div class="card">
+        <div class="card-header">
+            <h2>AI-Powered Performance Analyzer</h2>
+        </div>
+        <div class="card-body">
+            <p class="card-text">
+                Enter a command to profile. The analyzer will run the command using <code>perf</code>, generate a flame graph, and provide an AI-powered analysis of the performance data.
+            </p>
+
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            <form action="{{ url_for('perf_analyze') }}" method="POST">
+                <div class="mb-3">
+                    <label for="command" class="form-label"><strong>Command to Profile</strong></label>
+                    <input type="text" class="form-control" id="command" name="command" value="sleep 10" required>
+                    <div class="form-text">
+                        Example: <code>python my_script.py</code> or <code>./my_app --arg value</code>.
+                        Note: The command will be run with <code>sudo perf record</code>.
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label for="duration" class="form-label"><strong>Profiling Duration (seconds)</strong></label>
+                    <input type="number" class="form-control" id="duration" name="duration" value="10" min="1" max="300" required>
+                    <div class="form-text">
+                        How long to collect performance data.
+                    </div>
+                </div>
+                <button type="submit" class="btn btn-primary">Analyze Performance</button>
+            </form>
+        </div>
+        <div class="card-footer text-muted">
+            This tool provides insights but is not a substitute for expert analysis. Always exercise caution when running commands.
+        </div>
+    </div>
+</div>
+{% endblock %}
