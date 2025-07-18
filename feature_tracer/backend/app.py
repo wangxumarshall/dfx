@@ -1,6 +1,8 @@
+
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from data import get_all_data, get_domain_by_id, update_feature_status
+
 
 app = Flask(__name__)
 CORS(app)
@@ -11,6 +13,7 @@ def get_features():
     API endpoint to get all feature data.
     """
     return jsonify(get_all_data())
+
 
 @app.route('/api/features/<string:domain_id>', methods=['GET'])
 def get_domain(domain_id):

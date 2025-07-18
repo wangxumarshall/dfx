@@ -1,4 +1,3 @@
-import json
 
 import json
 
@@ -101,3 +100,4 @@ def update_feature_status(domain_id, feature_id, new_status):
                 feature['status'] = new_status
                 return True
     return False
+

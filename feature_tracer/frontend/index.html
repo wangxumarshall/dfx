@@ -671,6 +671,7 @@
 
     // 初始化图表
     document.addEventListener('DOMContentLoaded', function() {
+
       let allDomains = [];
 
       function renderDomains(domains) {
@@ -784,6 +785,7 @@
         .then(response => response.json())
         .then(data => {
           allDomains = data.domains;
+
           // 更新概览数据
           document.querySelector('.text-dark-3').textContent = `最后更新：${data.summary.last_updated}`;
           document.querySelector('.text-2xl.font-bold.mt-1').textContent = data.summary.total_features.toLocaleString();
@@ -853,6 +855,7 @@
 
           // 更新领域卡片
           renderDomains(allDomains);
+
         });
 
       // 模态框操作
@@ -874,6 +877,7 @@
       });
 
       // 双击卡片打开模态框
+
       document.querySelector('.grid.grid-cols-1.md\\:grid-cols-2.lg\\:grid-cols-3.gap-6').addEventListener('dblclick', (e) => {
           const card = e.target.closest('.card-hover');
           if (card) {
@@ -904,6 +908,7 @@
                   renderDomains(filteredDomains);
               }
           });
+
       });
     });
   </script>
