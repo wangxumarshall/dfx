@@ -1,0 +1,911 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>操作系统功能完备度监控看板</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.8/dist/chart.umd.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: '#165DFF',
+            secondary: '#36CFC9',
+            success: '#00B42A',
+            warning: '#FF7D00',
+            danger: '#F53F3F',
+            dark: '#1D2129',
+            'dark-2': '#4E5969',
+            'dark-3': '#86909C',
+            'light-1': '#F2F3F5',
+            'light-2': '#F7F8FA',
+            'light-3': '#FFFFFF',
+          },
+          fontFamily: {
+            inter: ['Inter', 'sans-serif'],
+          },
+        },
+      }
+    }
+  </script>
+
+  <style type="text/tailwindcss">
+    @layer utilities {
+      .content-auto {
+        content-visibility: auto;
+      }
+      .scrollbar-hide {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+      }
+      .scrollbar-hide::-webkit-scrollbar {
+        display: none;
+      }
+      .card-shadow {
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+      }
+      .card-hover {
+        transition: transform 0.3s ease, box-shadow 0.3s ease;
+      }
+      .card-hover:hover {
+        transform: translateY(-5px);
+        box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+      }
+    }
+  </style>
+</head>
+<body class="font-inter bg-light-2 text-dark min-h-screen flex flex-col">
+  <!-- 顶部导航栏 -->
+  <header class="bg-white shadow-sm sticky top-0 z-50 transition-all duration-300" id="navbar">
+    <div class="container mx-auto px-4 py-3 flex items-center justify-between">
+      <div class="flex items-center space-x-3">
+        <div class="bg-primary text-white p-2 rounded-lg">
+          <i class="fa fa-server text-xl"></i>
+        </div>
+        <h1 class="text-xl font-bold text-primary">OS功能完备度监控</h1>
+      </div>
+
+      <div class="hidden md:flex items-center space-x-6">
+        <a href="#" class="text-dark-2 hover:text-primary transition-colors">首页</a>
+        <a href="#" class="text-dark-2 hover:text-primary transition-colors">报告</a>
+        <a href="#" class="text-dark-2 hover:text-primary transition-colors">文档</a>
+        <a href="#" class="text-dark-2 hover:text-primary transition-colors">帮助</a>
+      </div>
+
+      <div class="flex items-center space-x-4">
+        <button class="bg-primary/10 text-primary px-4 py-2 rounded-lg hover:bg-primary/20 transition-colors flex items-center">
+          <i class="fa fa-plus mr-2"></i>
+          <span>添加功能</span>
+        </button>
+        <div class="relative">
+          <img src="https://picsum.photos/id/1005/200/200" alt="用户头像" class="w-8 h-8 rounded-full object-cover cursor-pointer">
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- 主要内容区域 -->
+  <main class="flex-1 container mx-auto px-4 py-6">
+    <!-- 概览区域 -->
+    <section class="mb-8">
+      <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6">
+        <div>
+          <h2 class="text-[clamp(1.5rem,3vw,2.5rem)] font-bold text-dark mb-2">功能完备度概览</h2>
+          <p class="text-dark-3">最后更新：2025年7月18日 14:30</p>
+        </div>
+        <div class="mt-4 md:mt-0 flex space-x-3">
+          <button class="bg-white border border-light-1 rounded-lg px-4 py-2 text-dark-2 hover:bg-light-1 transition-colors flex items-center">
+            <i class="fa fa-calendar mr-2"></i>
+            <span>本周</span>
+          </button>
+          <button class="bg-primary text-white rounded-lg px-4 py-2 hover:bg-primary/90 transition-colors flex items-center">
+            <i class="fa fa-refresh mr-2"></i>
+            <span>刷新数据</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+        <!-- 总功能项卡片 -->
+        <div class="bg-white rounded-xl p-6 card-shadow card-hover">
+          <div class="flex justify-between items-start mb-4">
+            <div>
+              <p class="text-dark-3 text-sm">总功能项</p>
+              <h3 class="text-2xl font-bold mt-1">3,000</h3>
+            </div>
+            <div class="bg-primary/10 p-3 rounded-lg">
+              <i class="fa fa-cubes text-primary text-xl"></i>
+            </div>
+          </div>
+          <div class="flex items-center">
+            <div class="w-full bg-light-1 rounded-full h-2">
+              <div class="bg-primary h-2 rounded-full" style="width: 65%"></div>
+            </div>
+            <span class="ml-3 text-primary font-semibold">65%</span>
+          </div>
+          <p class="text-dark-3 text-sm mt-2">1,950 个已完成</p>
+        </div>
+
+        <!-- 已完成卡片 -->
+        <div class="bg-white rounded-xl p-6 card-shadow card-hover">
+          <div class="flex justify-between items-start mb-4">
+            <div>
+              <p class="text-dark-3 text-sm">已完成功能</p>
+              <h3 class="text-2xl font-bold mt-1">1,950</h3>
+            </div>
+            <div class="bg-success/10 p-3 rounded-lg">
+              <i class="fa fa-check-circle text-success text-xl"></i>
+            </div>
+          </div>
+          <div class="flex items-center">
+            <div class="w-full bg-light-1 rounded-full h-2">
+              <div class="bg-success h-2 rounded-full" style="width: 65%"></div>
+            </div>
+            <span class="ml-3 text-success font-semibold">+5%</span>
+          </div>
+          <p class="text-dark-3 text-sm mt-2">相比上周增长</p>
+        </div>
+
+        <!-- 进行中卡片 -->
+        <div class="bg-white rounded-xl p-6 card-shadow card-hover">
+          <div class="flex justify-between items-start mb-4">
+            <div>
+              <p class="text-dark-3 text-sm">进行中功能</p>
+              <h3 class="text-2xl font-bold mt-1">750</h3>
+            </div>
+            <div class="bg-warning/10 p-3 rounded-lg">
+              <i class="fa fa-spinner text-warning text-xl"></i>
+            </div>
+          </div>
+          <div class="flex items-center">
+            <div class="w-full bg-light-1 rounded-full h-2">
+              <div class="bg-warning h-2 rounded-full" style="width: 25%"></div>
+            </div>
+            <span class="ml-3 text-warning font-semibold">25%</span>
+          </div>
+          <p class="text-dark-3 text-sm mt-2">750 个开发中</p>
+        </div>
+
+        <!-- 未开始卡片 -->
+        <div class="bg-white rounded-xl p-6 card-shadow card-hover">
+          <div class="flex justify-between items-start mb-4">
+            <div>
+              <p class="text-dark-3 text-sm">未开始功能</p>
+              <h3 class="text-2xl font-bold mt-1">300</h3>
+            </div>
+            <div class="bg-danger/10 p-3 rounded-lg">
+              <i class="fa fa-clock-o text-danger text-xl"></i>
+            </div>
+          </div>
+          <div class="flex items-center">
+            <div class="w-full bg-light-1 rounded-full h-2">
+              <div class="bg-danger h-2 rounded-full" style="width: 10%"></div>
+            </div>
+            <span class="ml-3 text-danger font-semibold">10%</span>
+          </div>
+          <p class="text-dark-3 text-sm mt-2">计划逐步开发</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 领域进度图表 -->
+    <section class="mb-8 bg-white rounded-xl p-6 card-shadow">
+      <div class="flex justify-between items-center mb-6">
+        <h3 class="text-xl font-bold">各领域功能完成情况</h3>
+        <div class="flex space-x-2">
+          <button class="text-dark-2 hover:text-primary transition-colors">
+            <i class="fa fa-download"></i>
+          </button>
+          <button class="text-dark-2 hover:text-primary transition-colors">
+            <i class="fa fa-expand"></i>
+          </button>
+        </div>
+      </div>
+      <div class="h-[300px]">
+        <canvas id="domainChart"></canvas>
+      </div>
+    </section>
+
+    <!-- 领域功能项区域 -->
+    <section>
+      <div class="flex justify-between items-center mb-6">
+        <h3 class="text-xl font-bold">各子领域功能完备度</h3>
+        <div class="relative">
+          <input type="text" placeholder="搜索功能项..." class="pl-10 pr-4 py-2 border border-light-1 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all w-full md:w-64">
+          <i class="fa fa-search absolute left-3 top-1/2 transform -translate-y-1/2 text-dark-3"></i>
+        </div>
+      </div>
+
+      <!-- 领域筛选标签 -->
+      <div class="flex flex-wrap gap-2 mb-6">
+        <button class="bg-primary text-white px-4 py-2 rounded-full text-sm font-medium">全部</button>
+        <button class="bg-white border border-light-1 px-4 py-2 rounded-full text-sm font-medium hover:border-primary hover:text-primary transition-colors">内存管理</button>
+        <button class="bg-white border border-light-1 px-4 py-2 rounded-full text-sm font-medium hover:border-primary hover:text-primary transition-colors">文件系统</button>
+        <button class="bg-white border border-light-1 px-4 py-2 rounded-full text-sm font-medium hover:border-primary hover:text-primary transition-colors">进程调度</button>
+        <button class="bg-white border border-light-1 px-4 py-2 rounded-full text-sm font-medium hover:border-primary hover:text-primary transition-colors">网络协议</button>
+        <button class="bg-white border border-light-1 px-4 py-2 rounded-full text-sm font-medium hover:border-primary hover:text-primary transition-colors">设备驱动</button>
+        <button class="bg-white border border-light-1 px-4 py-2 rounded-full text-sm font-medium hover:border-primary hover:text-primary transition-colors">安全机制</button>
+        <button class="bg-white border border-light-1 px-4 py-2 rounded-full text-sm font-medium hover:border-primary hover:text-primary transition-colors">用户界面</button>
+      </div>
+
+      <!-- 领域卡片网格 -->
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <!-- 内存管理卡片 -->
+        <div class="bg-white rounded-xl overflow-hidden card-shadow card-hover">
+          <div class="p-6">
+            <div class="flex justify-between items-start mb-4">
+              <div>
+                <h4 class="text-lg font-semibold flex items-center">
+                  <i class="fa fa-microchip text-primary mr-2"></i>
+                  内存管理
+                </h4>
+                <p class="text-dark-3 text-sm mt-1">420 个功能项</p>
+              </div>
+              <span class="bg-success/10 text-success px-3 py-1 rounded-full text-xs font-medium">78% 完成</span>
+            </div>
+
+            <div class="mb-4">
+              <div class="flex justify-between mb-1">
+                <span class="text-sm font-medium">完成进度</span>
+                <span class="text-sm font-medium text-success">328/420</span>
+              </div>
+              <div class="w-full bg-light-1 rounded-full h-2">
+                <div class="bg-success h-2 rounded-full" style="width: 78%"></div>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-3 gap-2 mb-4">
+              <div class="bg-light-2 rounded-lg p-3 text-center">
+                <p class="text-success font-bold text-xl">328</p>
+                <p class="text-dark-3 text-xs">已完成</p>
+              </div>
+              <div class="bg-light-2 rounded-lg p-3 text-center">
+                <p class="text-warning font-bold text-xl">65</p>
+                <p class="text-dark-3 text-xs">进行中</p>
+              </div>
+              <div class="bg-light-2 rounded-lg p-3 text-center">
+                <p class="text-danger font-bold text-xl">27</p>
+                <p class="text-dark-3 text-xs">未开始</p>
+              </div>
+            </div>
+
+            <button class="w-full py-2 border border-primary text-primary rounded-lg hover:bg-primary hover:text-white transition-colors flex items-center justify-center text-sm">
+              查看详情
+              <i class="fa fa-angle-right ml-1"></i>
+            </button>
+          </div>
+
+          <!-- 功能项列表（默认隐藏，点击详情后展开） -->
+          <div class="hidden border-t border-light-1 p-4">
+            <div class="flex justify-between items-center mb-3">
+              <h5 class="font-medium">核心功能项</h5>
+              <div class="text-xs text-dark-3">显示 5/420</div>
+            </div>
+
+            <div class="space-y-3 max-h-64 overflow-y-auto scrollbar-hide">
+              <div class="flex justify-between items-center p-2 bg-light-2 rounded-lg">
+                <div>
+                  <p class="text-sm font-medium">虚拟内存管理</p>
+                  <p class="text-dark-3 text-xs">支持分页和分段</p>
+                </div>
+                <span class="bg-success/10 text-success px-2 py-1 rounded-full text-xs">已完成</span>
+              </div>
+
+              <div class="flex justify-between items-center p-2 bg-light-2 rounded-lg">
+                <div>
+                  <p class="text-sm font-medium">内存分配算法</p>
+                  <p class="text-dark-3 text-xs">Buddy和Slab分配器</p>
+                </div>
+                <span class="bg-success/10 text-success px-2 py-1 rounded-full text-xs">已完成</span>
+              </div>
+
+              <div class="flex justify-between items-center p-2 bg-light-2 rounded-lg">
+                <div>
+                  <p class="text-sm font-medium">内存保护机制</p>
+                  <p class="text-dark-3 text-xs">实现内存访问控制</p>
+                </div>
+                <span class="bg-warning/10 text-warning px-2 py-1 rounded-full text-xs">进行中</span>
+              </div>
+
+              <div class="flex justify-between items-center p-2 bg-light-2 rounded-lg">
+                <div>
+                  <p class="text-sm font-medium">内存压缩</p>
+                  <p class="text-dark-3 text-xs">提高内存利用率</p>
+                </div>
+                <span class="bg-warning/10 text-warning px-2 py-1 rounded-full text-xs">进行中</span>
+              </div>
+
+              <div class="flex justify-between items-center p-2 bg-light-2 rounded-lg">
+                <div>
+                  <p class="text-sm font-medium">内存热插拔支持</p>
+                  <p class="text-dark-3 text-xs">动态添加/移除内存</p>
+                </div>
+                <span class="bg-danger/10 text-danger px-2 py-1 rounded-full text-xs">未开始</span>
+              </div>
+            </div>
+
+            <div class="mt-4 text-center">
+              <button class="text-primary text-sm hover:underline">查看全部功能项</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 文件系统卡片 -->
+        <div class="bg-white rounded-xl overflow-hidden card-shadow card-hover">
+          <div class="p-6">
+            <div class="flex justify-between items-start mb-4">
+              <div>
+                <h4 class="text-lg font-semibold flex items-center">
+                  <i class="fa fa-folder-open text-primary mr-2"></i>
+                  文件系统
+                </h4>
+                <p class="text-dark-3 text-sm mt-1">380 个功能项</p>
+              </div>
+              <span class="bg-success/10 text-success px-3 py-1 rounded-full text-xs font-medium">65% 完成</span>
+            </div>
+
+            <div class="mb-4">
+              <div class="flex justify-between mb-1">
+                <span class="text-sm font-medium">完成进度</span>
+                <span class="text-sm font-medium text-success">247/380</span>
+              </div>
+              <div class="w-full bg-light-1 rounded-full h-2">
+                <div class="bg-success h-2 rounded-full" style="width: 65%"></div>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-3 gap-2 mb-4">
+              <div class="bg-light-2 rounded-lg p-3 text-center">
+                <p class="text-success font-bold text-xl">247</p>
+                <p class="text-dark-3 text-xs">已完成</p>
+              </div>
+              <div class="bg-light-2 rounded-lg p-3 text-center">
+                <p class="text-warning font-bold text-xl">85</p>
+                <p class="text-dark-3 text-xs">进行中</p>
+              </div>
+              <div class="bg-light-2 rounded-lg p-3 text-center">
+                <p class="text-danger font-bold text-xl">48</p>
+                <p class="text-dark-3 text-xs">未开始</p>
+              </div>
+            </div>
+
+            <button class="w-full py-2 border border-primary text-primary rounded-lg hover:bg-primary hover:text-white transition-colors flex items-center justify-center text-sm">
+              查看详情
+              <i class="fa fa-angle-right ml-1"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- 进程调度卡片 -->
+        <div class="bg-white rounded-xl overflow-hidden card-shadow card-hover">
+          <div class="p-6">
+            <div class="flex justify-between items-start mb-4">
+              <div>
+                <h4 class="text-lg font-semibold flex items-center">
+                  <i class="fa fa-tasks text-primary mr-2"></i>
+                  进程调度
+                </h4>
+                <p class="text-dark-3 text-sm mt-1">290 个功能项</p>
+              </div>
+              <span class="bg-success/10 text-success px-3 py-1 rounded-full text-xs font-medium">82% 完成</span>
+            </div>
+
+            <div class="mb-4">
+              <div class="flex justify-between mb-1">
+                <span class="text-sm font-medium">完成进度</span>
+                <span class="text-sm font-medium text-success">238/290</span>
+              </div>
+              <div class="w-full bg-light-1 rounded-full h-2">
+                <div class="bg-success h-2 rounded-full" style="width: 82%"></div>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-3 gap-2 mb-4">
+              <div class="bg-light-2 rounded-lg p-3 text-center">
+                <p class="text-success font-bold text-xl">238</p>
+                <p class="text-dark-3 text-xs">已完成</p>
+              </div>
+              <div class="bg-light-2 rounded-lg p-3 text-center">
+                <p class="text-warning font-bold text-xl">42</p>
+                <p class="text-dark-3 text-xs">进行中</p>
+              </div>
+              <div class="bg-light-2 rounded-lg p-3 text-center">
+                <p class="text-danger font-bold text-xl">10</p>
+                <p class="text-dark-3 text-xs">未开始</p>
+              </div>
+            </div>
+
+            <button class="w-full py-2 border border-primary text-primary rounded-lg hover:bg-primary hover:text-white transition-colors flex items-center justify-center text-sm">
+              查看详情
+              <i class="fa fa-angle-right ml-1"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- 网络协议卡片 -->
+        <div class="bg-white rounded-xl overflow-hidden card-shadow card-hover">
+          <div class="p-6">
+            <div class="flex justify-between items-start mb-4">
+              <div>
+                <h4 class="text-lg font-semibold flex items-center">
+                  <i class="fa fa-wifi text-primary mr-2"></i>
+                  网络协议
+                </h4>
+                <p class="text-dark-3 text-sm mt-1">450 个功能项</p>
+              </div>
+              <span class="bg-success/10 text-success px-3 py-1 rounded-full text-xs font-medium">55% 完成</span>
+            </div>
+
+            <div class="mb-4">
+              <div class="flex justify-between mb-1">
+                <span class="text-sm font-medium">完成进度</span>
+                <span class="text-sm font-medium text-success">248/450</span>
+              </div>
+              <div class="w-full bg-light-1 rounded-full h-2">
+                <div class="bg-success h-2 rounded-full" style="width: 55%"></div>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-3 gap-2 mb-4">
+              <div class="bg-light-2 rounded-lg p-3 text-center">
+                <p class="text-success font-bold text-xl">248</p>
+                <p class="text-dark-3 text-xs">已完成</p>
+              </div>
+              <div class="bg-light-2 rounded-lg p-3 text-center">
+                <p class="text-warning font-bold text-xl">125</p>
+                <p class="text-dark-3 text-xs">进行中</p>
+              </div>
+              <div class="bg-light-2 rounded-lg p-3 text-center">
+                <p class="text-danger font-bold text-xl">77</p>
+                <p class="text-dark-3 text-xs">未开始</p>
+              </div>
+            </div>
+
+            <button class="w-full py-2 border border-primary text-primary rounded-lg hover:bg-primary hover:text-white transition-colors flex items-center justify-center text-sm">
+              查看详情
+              <i class="fa fa-angle-right ml-1"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- 设备驱动卡片 -->
+        <div class="bg-white rounded-xl overflow-hidden card-shadow card-hover">
+          <div class="p-6">
+            <div class="flex justify-between items-start mb-4">
+              <div>
+                <h4 class="text-lg font-semibold flex items-center">
+                  <i class="fa fa-plug text-primary mr-2"></i>
+                  设备驱动
+                </h4>
+                <p class="text-dark-3 text-sm mt-1">520 个功能项</p>
+              </div>
+              <span class="bg-warning/10 text-warning px-3 py-1 rounded-full text-xs font-medium">45% 完成</span>
+            </div>
+
+            <div class="mb-4">
+              <div class="flex justify-between mb-1">
+                <span class="text-sm font-medium">完成进度</span>
+                <span class="text-sm font-medium text-warning">234/520</span>
+              </div>
+              <div class="w-full bg-light-1 rounded-full h-2">
+                <div class="bg-warning h-2 rounded-full" style="width: 45%"></div>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-3 gap-2 mb-4">
+              <div class="bg-light-2 rounded-lg p-3 text-center">
+                <p class="text-success font-bold text-xl">234</p>
+                <p class="text-dark-3 text-xs">已完成</p>
+              </div>
+              <div class="bg-light-2 rounded-lg p-3 text-center">
+                <p class="text-warning font-bold text-xl">182</p>
+                <p class="text-dark-3 text-xs">进行中</p>
+              </div>
+              <div class="bg-light-2 rounded-lg p-3 text-center">
+                <p class="text-danger font-bold text-xl">104</p>
+                <p class="text-dark-3 text-xs">未开始</p>
+              </div>
+            </div>
+
+            <button class="w-full py-2 border border-primary text-primary rounded-lg hover:bg-primary hover:text-white transition-colors flex items-center justify-center text-sm">
+              查看详情
+              <i class="fa fa-angle-right ml-1"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- 安全机制卡片 -->
+        <div class="bg-white rounded-xl overflow-hidden card-shadow card-hover">
+          <div class="p-6">
+            <div class="flex justify-between items-start mb-4">
+              <div>
+                <h4 class="text-lg font-semibold flex items-center">
+                  <i class="fa fa-lock text-primary mr-2"></i>
+                  安全机制
+                </h4>
+                <p class="text-dark-3 text-sm mt-1">440 个功能项</p>
+              </div>
+              <span class="bg-success/10 text-success px-3 py-1 rounded-full text-xs font-medium">72% 完成</span>
+            </div>
+
+            <div class="mb-4">
+              <div class="flex justify-between mb-1">
+                <span class="text-sm font-medium">完成进度</span>
+                <span class="text-sm font-medium text-success">317/440</span>
+              </div>
+              <div class="w-full bg-light-1 rounded-full h-2">
+                <div class="bg-success h-2 rounded-full" style="width: 72%"></div>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-3 gap-2 mb-4">
+              <div class="bg-light-2 rounded-lg p-3 text-center">
+                <p class="text-success font-bold text-xl">317</p>
+                <p class="text-dark-3 text-xs">已完成</p>
+              </div>
+              <div class="bg-light-2 rounded-lg p-3 text-center">
+                <p class="text-warning font-bold text-xl">83</p>
+                <p class="text-dark-3 text-xs">进行中</p>
+              </div>
+              <div class="bg-light-2 rounded-lg p-3 text-center">
+                <p class="text-danger font-bold text-xl">40</p>
+                <p class="text-dark-3 text-xs">未开始</p>
+              </div>
+            </div>
+
+            <button class="w-full py-2 border border-primary text-primary rounded-lg hover:bg-primary hover:text-white transition-colors flex items-center justify-center text-sm">
+              查看详情
+              <i class="fa fa-angle-right ml-1"></i>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 加载更多按钮 -->
+      <div class="mt-8 text-center">
+        <button class="bg-white border border-light-1 text-dark px-6 py-3 rounded-lg hover:bg-light-1 transition-colors flex items-center mx-auto">
+          <i class="fa fa-refresh mr-2"></i>
+          加载更多领域
+        </button>
+      </div>
+    </section>
+  </main>
+
+  <!-- 页脚 -->
+  <footer class="bg-white border-t border-light-1 py-6 mt-12">
+    <div class="container mx-auto px-4">
+      <div class="flex flex-col md:flex-row justify-between items-center">
+        <div class="mb-4 md:mb-0">
+          <p class="text-dark-3 text-sm">© 2025 OS开发团队. 保留所有权利.</p>
+        </div>
+        <div class="flex space-x-6">
+          <a href="#" class="text-dark-3 hover:text-primary transition-colors">
+            <i class="fa fa-github text-xl"></i>
+          </a>
+          <a href="#" class="text-dark-3 hover:text-primary transition-colors">
+            <i class="fa fa-twitter text-xl"></i>
+          </a>
+          <a href="#" class="text-dark-3 hover:text-primary transition-colors">
+            <i class="fa fa-linkedin text-xl"></i>
+          </a>
+        </div>
+      </div>
+    </div>
+  </footer>
+
+  <!-- 功能项状态更新模态框 (默认隐藏) -->
+  <div class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 hidden" id="updateModal">
+    <div class="bg-white rounded-xl w-full max-w-md p-6 transform transition-all">
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="text-lg font-bold">更新功能状态</h3>
+        <button class="text-dark-3 hover:text-dark" id="closeModal">
+          <i class="fa fa-times"></i>
+        </button>
+      </div>
+
+      <div class="mb-4">
+        <label class="block text-dark-2 mb-2">功能名称</label>
+        <input type="text" value="虚拟内存管理" class="w-full px-4 py-2 border border-light-1 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all">
+      </div>
+
+      <div class="mb-4">
+        <label class="block text-dark-2 mb-2">所属领域</label>
+        <select class="w-full px-4 py-2 border border-light-1 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all">
+          <option>内存管理</option>
+          <option>文件系统</option>
+          <option>进程调度</option>
+          <option>网络协议</option>
+          <option>设备驱动</option>
+          <option>安全机制</option>
+        </select>
+      </div>
+
+      <div class="mb-4">
+        <label class="block text-dark-2 mb-2">当前状态</label>
+        <div class="grid grid-cols-3 gap-2">
+          <button class="py-2 bg-success/10 text-success rounded-lg hover:bg-success/20 transition-colors">
+            已完成
+          </button>
+          <button class="py-2 bg-warning/10 text-warning rounded-lg hover:bg-warning/20 transition-colors">
+            进行中
+          </button>
+          <button class="py-2 bg-danger/10 text-danger rounded-lg hover:bg-danger/20 transition-colors">
+            未开始
+          </button>
+        </div>
+      </div>
+
+      <div class="mb-4">
+        <label class="block text-dark-2 mb-2">详细描述</label>
+        <textarea rows="3" class="w-full px-4 py-2 border border-light-1 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all">支持分页和分段内存管理，实现了基本的内存保护机制和页面置换算法。</textarea>
+      </div>
+
+      <div class="flex justify-end space-x-3">
+        <button class="px-4 py-2 border border-light-1 rounded-lg hover:bg-light-1 transition-colors">
+          取消
+        </button>
+        <button class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-primary/90 transition-colors">
+          保存更改
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // 导航栏滚动效果
+    window.addEventListener('scroll', function() {
+      const navbar = document.getElementById('navbar');
+      if (window.scrollY > 10) {
+        navbar.classList.add('shadow-md');
+        navbar.classList.remove('shadow-sm');
+      } else {
+        navbar.classList.remove('shadow-md');
+        navbar.classList.add('shadow-sm');
+      }
+    });
+
+    // 初始化图表
+    document.addEventListener('DOMContentLoaded', function() {
+      let allDomains = [];
+
+      function renderDomains(domains) {
+          const domainGrid = document.querySelector('.grid.grid-cols-1.md\\:grid-cols-2.lg\\:grid-cols-3.gap-6');
+          domainGrid.innerHTML = ''; // 清空现有卡片
+          domains.forEach(domain => {
+            const percentage = Math.round((domain.completed / domain.total_features) * 100);
+            const card = `
+              <div class="bg-white rounded-xl overflow-hidden card-shadow card-hover" data-domain-id="${domain.id}" data-domain-name="${domain.name}">
+                <div class="p-6">
+                  <div class="flex justify-between items-start mb-4">
+                    <div>
+                      <h4 class="text-lg font-semibold flex items-center">
+                        <i class="fa ${domain.icon} text-primary mr-2"></i>
+                        ${domain.name}
+                      </h4>
+                      <p class="text-dark-3 text-sm mt-1">${domain.total_features} 个功能项</p>
+                    </div>
+                    <span class="bg-success/10 text-success px-3 py-1 rounded-full text-xs font-medium">${percentage}% 完成</span>
+                  </div>
+
+                  <div class="mb-4">
+                    <div class="flex justify-between mb-1">
+                      <span class="text-sm font-medium">完成进度</span>
+                      <span class="text-sm font-medium text-success">${domain.completed}/${domain.total_features}</span>
+                    </div>
+                    <div class="w-full bg-light-1 rounded-full h-2">
+                      <div class="bg-success h-2 rounded-full" style="width: ${percentage}%"></div>
+                    </div>
+                  </div>
+
+                  <div class="grid grid-cols-3 gap-2 mb-4">
+                    <div class="bg-light-2 rounded-lg p-3 text-center">
+                      <p class="text-success font-bold text-xl">${domain.completed}</p>
+                      <p class="text-dark-3 text-xs">已完成</p>
+                    </div>
+                    <div class="bg-light-2 rounded-lg p-3 text-center">
+                      <p class="text-warning font-bold text-xl">${domain.in_progress}</p>
+                      <p class="text-dark-3 text-xs">进行中</p>
+                    </div>
+                    <div class="bg-light-2 rounded-lg p-3 text-center">
+                      <p class="text-danger font-bold text-xl">${domain.not_started}</p>
+                      <p class="text-dark-3 text-xs">未开始</p>
+                    </div>
+                  </div>
+
+                  <button class="w-full py-2 border border-primary text-primary rounded-lg hover:bg-primary hover:text-white transition-colors flex items-center justify-center text-sm view-details-btn">
+                    查看详情
+                    <i class="fa fa-angle-right ml-1"></i>
+                  </button>
+                </div>
+                <div class="hidden border-t border-light-1 p-4 feature-list"></div>
+              </div>
+            `;
+            domainGrid.innerHTML += card;
+          });
+
+          // 卡片点击事件 - 展开/收起详情
+          const cards = document.querySelectorAll('.card-hover');
+          cards.forEach(card => {
+            const detailsBtn = card.querySelector('.view-details-btn');
+            const detailsSection = card.querySelector('.feature-list');
+
+            if (detailsBtn && detailsSection) {
+              detailsBtn.addEventListener('click', () => {
+                const isHidden = detailsSection.classList.contains('hidden');
+                if (isHidden) {
+                    const domainId = card.dataset.domainId;
+                    fetch(`http://localhost:5001/api/features/${domainId}`)
+                        .then(response => response.json())
+                        .then(domain => {
+                            detailsSection.innerHTML = renderFeatures(domain.features);
+                            detailsSection.classList.remove('hidden');
+                            detailsBtn.innerHTML = '收起详情 <i class="fa fa-angle-down ml-1"></i>';
+                        });
+                } else {
+                    detailsSection.classList.add('hidden');
+                    detailsBtn.innerHTML = '查看详情 <i class="fa fa-angle-right ml-1"></i>';
+                }
+              });
+            }
+          });
+      }
+
+      function renderFeatures(features) {
+          if (!features || features.length === 0) {
+              return '<p class="text-dark-3 text-sm text-center">没有可用的功能。</p>';
+          }
+          let featuresHtml = '';
+          features.forEach(feature => {
+              let statusClass = '';
+              switch(feature.status) {
+                  case '已完成': statusClass = 'bg-success/10 text-success'; break;
+                  case '进行中': statusClass = 'bg-warning/10 text-warning'; break;
+                  case '未开始': statusClass = 'bg-danger/10 text-danger'; break;
+              }
+              featuresHtml += `
+                <div class="flex justify-between items-center p-2 bg-light-2 rounded-lg">
+                  <div>
+                    <p class="text-sm font-medium">${feature.name}</p>
+                    <p class="text-dark-3 text-xs">${feature.description}</p>
+                  </div>
+                  <span class="${statusClass} px-2 py-1 rounded-full text-xs">${feature.status}</span>
+                </div>
+              `;
+          });
+          return featuresHtml;
+      }
+
+      fetch('http://localhost:5001/api/features')
+        .then(response => response.json())
+        .then(data => {
+          allDomains = data.domains;
+          // 更新概览数据
+          document.querySelector('.text-dark-3').textContent = `最后更新：${data.summary.last_updated}`;
+          document.querySelector('.text-2xl.font-bold.mt-1').textContent = data.summary.total_features.toLocaleString();
+          const totalPercentage = (data.summary.completed_features / data.summary.total_features) * 100;
+          document.querySelector('.bg-primary.h-2.rounded-full').style.width = `${totalPercentage}%`;
+          document.querySelector('.ml-3.text-primary.font-semibold').textContent = `${Math.round(totalPercentage)}%`;
+          document.querySelectorAll('.text-dark-3.text-sm.mt-2')[0].textContent = `${data.summary.completed_features.toLocaleString()} 个已完成`;
+
+          document.querySelectorAll('.text-2xl.font-bold.mt-1')[1].textContent = data.summary.completed_features.toLocaleString();
+          document.querySelectorAll('.bg-success.h-2.rounded-full')[0].style.width = `${(data.summary.completed_features / data.summary.total_features) * 100}%`;
+
+          document.querySelectorAll('.text-2xl.font-bold.mt-1')[2].textContent = data.summary.in_progress_features.toLocaleString();
+          document.querySelectorAll('.bg-warning.h-2.rounded-full')[0].style.width = `${(data.summary.in_progress_features / data.summary.total_features) * 100}%`;
+
+          document.querySelectorAll('.text-2xl.font-bold.mt-1')[3].textContent = data.summary.not_started_features.toLocaleString();
+          document.querySelectorAll('.bg-danger.h-2.rounded-full')[0].style.width = `${(data.summary.not_started_features / data.summary.total_features) * 100}%`;
+
+          // 更新图表
+          const ctx = document.getElementById('domainChart').getContext('2d');
+          const domainChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+              labels: data.domains.map(d => d.name),
+              datasets: [{
+                label: '已完成功能',
+                data: data.domains.map(d => d.completed),
+                backgroundColor: '#00B42A',
+                borderRadius: 6,
+              }, {
+                label: '进行中功能',
+                data: data.domains.map(d => d.in_progress),
+                backgroundColor: '#FF7D00',
+                borderRadius: 6,
+              }, {
+                label: '未开始功能',
+                data: data.domains.map(d => d.not_started),
+                backgroundColor: '#F53F3F',
+                borderRadius: 6,
+              }]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: {
+                legend: {
+                  position: 'top',
+                },
+                tooltip: {
+                  mode: 'index',
+                  intersect: false,
+                }
+              },
+              scales: {
+                x: {
+                  stacked: true,
+                },
+                y: {
+                  stacked: true,
+                  beginAtZero: true,
+                  grid: {
+                    drawBorder: false,
+                  }
+                }
+              }
+            }
+          });
+
+          // 更新领域卡片
+          renderDomains(allDomains);
+        });
+
+      // 模态框操作
+      const modal = document.getElementById('updateModal');
+      const closeBtn = document.getElementById('closeModal');
+
+      // 点击关闭按钮隐藏模态框
+      if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+          modal.classList.add('hidden');
+        });
+      }
+
+      // 点击模态框外部区域隐藏模态框
+      modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+          modal.classList.add('hidden');
+        }
+      });
+
+      // 双击卡片打开模态框
+      document.querySelector('.grid.grid-cols-1.md\\:grid-cols-2.lg\\:grid-cols-3.gap-6').addEventListener('dblclick', (e) => {
+          const card = e.target.closest('.card-hover');
+          if (card) {
+              modal.classList.remove('hidden');
+          }
+      });
+
+      // 搜索功能
+      const searchInput = document.querySelector('input[type="text"]');
+      searchInput.addEventListener('input', (e) => {
+          const searchTerm = e.target.value.toLowerCase();
+          const filteredDomains = allDomains.filter(domain => domain.name.toLowerCase().includes(searchTerm));
+          renderDomains(filteredDomains);
+      });
+
+      // 筛选功能
+      const filterButtons = document.querySelectorAll('.flex.flex-wrap.gap-2.mb-6 button');
+      filterButtons.forEach(button => {
+          button.addEventListener('click', () => {
+              const filter = button.textContent;
+              filterButtons.forEach(btn => btn.classList.remove('bg-primary', 'text-white'));
+              button.classList.add('bg-primary', 'text-white');
+
+              if (filter === '全部') {
+                  renderDomains(allDomains);
+              } else {
+                  const filteredDomains = allDomains.filter(domain => domain.name === filter);
+                  renderDomains(filteredDomains);
+              }
+          });
+      });
+    });
+  </script>
+</body>
+</html>
